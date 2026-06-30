@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-payment-search-kit"
+version = "0.1.0"
+description = "Local-first transaction search toolkit with a browser UI and deterministic payment-search CLI."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "cryptography>=42",
+  "fastapi>=0.111,<0.116",
+  "httpx>=0.27,<1",
+  "uvicorn>=0.30,<1",
+]
+authors = [{ name = "Ethion" }]
+license = { file = "LICENSE" }
+keywords = ["payments", "transaction-search", "merchant-tools", "local-first", "nmi"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+]
+
+[project.scripts]
+payment-search = "payment_evidence.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

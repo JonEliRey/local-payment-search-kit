@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.log
+
+# Local Payment Search runtime state. Never commit credentials/artifacts.
+.payment-search/
+config.json
+secrets.json
+web-artifacts/
+artifacts/
+
+# OS/editor noise
+.DS_Store
+.vscode/
+.idea/
