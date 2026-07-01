@@ -7,8 +7,8 @@ The human surface is the browser. The agent surface is the CLI/API. Agents shoul
 ## What this is
 
 - A local Payment Search browser app.
-- A deterministic `payment-search` CLI for setup support and AI-agent operation.
-- A guided merchant credential setup path.
+- A browser setup wizard for human merchant credential setup.
+- A deterministic `payment-search` CLI for AI-agent operation and setup fallback.
 - Local-only config, secrets, and artifacts under `~/.payment-search/` by default.
 - A clean, source-available distribution for authorized merchant-side use.
 
@@ -42,6 +42,13 @@ python -m pip install -e . pytest
 
 Or use the setup wrappers:
 
+Double-click launcher:
+
+- Windows: double-click `START_LOCAL_KIT.bat`
+- macOS/Linux desktop: double-click `START_LOCAL_KIT.command` where supported, or run it from Terminal
+
+The launcher lets you choose Install / Update, Start Browser App, or Run Tests without copying commands.
+
 ```bash
 ./scripts/setup-local-kit.sh
 ```
@@ -61,7 +68,15 @@ payment-search start --help
 
 ## Add a merchant
 
-Interactive:
+Human-first path:
+
+```bash
+payment-search start
+```
+
+Open the local URL. If no merchant is configured, choose **Open setup wizard** or visit `/setup`. The browser setup wizard saves the merchant config locally and stores the raw API key only in the local secret store.
+
+Agent/CLI fallback:
 
 ```bash
 payment-search add-merchant
@@ -86,9 +101,32 @@ The generated config stores `local_secret_ref`, not the raw key. Secrets stay in
 payment-search start
 ```
 
-Then open the local URL shown in the terminal and use Transaction Search.
+By default, the browser app listens on:
 
-If setup is incomplete, the browser starts anyway and shows setup-required guidance.
+```text
+http://127.0.0.1:8787
+```
+
+Open the local URL shown in the terminal and use Transaction Search. If another local process already owns `8787`, stop that process or start this app with an explicit alternate port:
+
+```bash
+payment-search start --port 8788
+```
+
+If setup is incomplete, the browser starts anyway and shows setup-required guidance with a link to the browser setup wizard.
+
+## Merchant management
+
+Use the browser setup wizard at `/setup` to add, update, or remove local merchant entries. The setup page defaults to a blank new-merchant form. Selecting an existing merchant pre-fills its values for editing. Existing merchant updates and removals require confirmation before local config or secret-store changes are written.
+
+Transaction search results include row-level **See detail** actions. Detail generation writes local UTF-8 HTML/JSON artifacts under `~/.payment-search/artifacts/` by default. The result page links back to **Search** and **Merchants** for follow-up work.
+
+## Troubleshooting
+
+- **Windows still shows `Gateway request failed` after pulling:** stop the old app process, run Install / Update again, then restart from the updated branch. The Windows artifact writer requires the UTF-8 fix in this branch.
+- **Port changes every run:** update to the latest `feat/browser-setup-wizard` branch. `payment-search start` now uses stable local port `8787` by default.
+- **Port `8787` is already in use:** stop the old process or pass `--port <other-port>` explicitly.
+- **WSL works but Windows fails:** verify Windows has pulled the latest branch and is running its own updated `.venv`; WSL and Windows use separate local state and Python environments.
 
 ## Safety rules
 

@@ -4,6 +4,7 @@ import html
 import json
 import time
 from argparse import Namespace
+from types import SimpleNamespace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -16,9 +17,12 @@ from .artifacts import ArtifactStore
 from .cloudflare_access import validator_from_jwks_url
 from .config import load_configured_aliases, load_merchant_config, resolve_default_merchant_alias
 from .identity import CloudflareValidator, extract_identity
+from .secret_store import LocalSecretStore, default_secret_store_path
 from .secrets import resolve_security_key
 from .service_requests import validation_error_response, validate_investigate_request, validate_search_request
 from .tenant_registry import TenantRegistry
+
+LOCAL_ARTIFACT_TTL_SECONDS = 100 * 365 * 24 * 60 * 60
 
 
 def render_human_search_dashboard(
@@ -84,6 +88,7 @@ def render_human_search_dashboard(
     .theme-control {{ display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:12px; background:var(--tool-bg); border:1px solid var(--tool-line); }}
     .theme-control label {{ color:white; font-size:.78rem; font-weight:850; text-transform:uppercase; letter-spacing:.08em; }}
     .theme-control select {{ min-height:34px; border-radius:9px; border:1px solid rgba(255,255,255,.25); background:rgba(2,6,23,.34); color:white; font:inherit; font-weight:750; padding:4px 8px; }}
+    .app-nav {{ display:flex; gap:10px; flex-wrap:wrap; }} .nav-button {{ display:inline-flex; align-items:center; justify-content:center; border:0; border-radius:12px; padding:9px 12px; font-weight:850; background:var(--brand); color:white; text-decoration:none; }}
     main {{ width:min(1120px, calc(100% - 32px)); margin:28px auto 54px; }} .hero {{ padding:26px; border-radius:24px; background:linear-gradient(135deg,#0f172a,#1d4ed8 62%,#0f766e); color:white; box-shadow:0 18px 40px rgba(15,23,42,.12); }}
     .hero p {{ max-width:820px; opacity:.88; }} section {{ margin-top:16px; padding:20px; background:var(--panel); border:1px solid var(--line); border-radius:18px; box-shadow:0 8px 22px rgba(15,23,42,.06); }}
     form {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:14px; }} label {{ display:grid; gap:6px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; font-size:.74rem; font-weight:800; }}
@@ -94,6 +99,7 @@ def render_human_search_dashboard(
 </head>
 <body>
 <div class="page-tools">
+  <nav class="app-nav" aria-label="Primary"><a class="nav-button" href="/">Search</a><a class="nav-button" href="/setup">Merchants</a></nav>
   <div class="theme-control" role="group" aria-label="Theme">
     <label for="themeSelect">Theme</label>
     <select id="themeSelect" aria-label="Theme">
@@ -114,7 +120,7 @@ def render_human_search_dashboard(
     </form>
     <p class="status" id="dateRequirementNote">Date window required unless a transaction ID is provided.</p>
   </section>
-  <section data-testid="candidate-results"><h2>Transaction results</h2><div id="status" class="status" role="status" aria-live="polite" aria-busy="false">No search run yet.</div><p class="note">Transaction detail links expire after 1 hour. Search again if a saved detail link expires.</p><div id="results" style="margin-top:12px"></div></section>
+  <section data-testid="candidate-results"><h2>Transaction results</h2><div id="status" class="status" role="status" aria-live="polite" aria-busy="false">No search run yet.</div><p class="note">Transaction detail pages are retained in local run history on this machine. Use local files responsibly and purge history when you no longer need it.</p><div id="results" style="margin-top:12px"></div></section>
 </main>
 <script type="application/json" id="dashboardContext">{context_json}</script>
 <script>
@@ -152,8 +158,215 @@ def _render_setup_required_panel() -> str:
     return (
         '<section data-testid="setup-required"><h2>Setup required</h2>'
         '<p class="note">Add your merchant API credentials before running Transaction Search.</p>'
+        '<p><a href="/setup">Open setup wizard</a> to add credentials in the browser.</p>'
         '<p>Run:</p><pre><code>payment-search add-merchant</code></pre></section>'
     )
+
+
+def render_setup_wizard(
+    *,
+    error: str | None = None,
+    values: dict[str, Any] | None = None,
+    config_path: str | Path | None = None,
+    selected_alias: str | None = None,
+) -> str:
+    config = _read_setup_config(config_path)
+    merchants = config.get("merchants", {}) if isinstance(config.get("merchants"), dict) else {}
+    selected = _clean(selected_alias) or _clean((values or {}).get("original_alias")) or _clean((values or {}).get("selected_alias")) or ""
+    selected_entry = merchants.get(selected, {}) if selected else {}
+    merged_values = {
+        "alias": selected or "",
+        "display_name": selected_entry.get("display_name") or "",
+        "gateway": selected_entry.get("gateway") or "nmi",
+        "base_url": selected_entry.get("base_url") or "https://mbcard.transactiongateway.com",
+    }
+    if values:
+        for key in ("alias", "display_name", "gateway", "base_url"):
+            value = _clean(values.get(key))
+            if value is not None:
+                merged_values[key] = value
+    error_html = f'<p class="error">{_e(error)}</p>' if error else ""
+    options = ''.join(
+        f'<option value="{_e(alias)}"{" selected" if alias == selected else ""}>{_e(entry.get("display_name") or alias)}</option>'
+        for alias, entry in sorted(merchants.items())
+        if isinstance(entry, dict)
+    )
+    add_selected = " selected" if not selected else ""
+    existing = (
+        f'<label>Existing merchants <select name="existing_merchant" onchange="window.location=\'/setup\'+(this.value?\'?merchant=\'+encodeURIComponent(this.value):\'\')"><option value=""{add_selected}>Add new merchant</option>{options}</select></label>'
+        if merchants
+        else '<p class="note">No merchants configured yet. Add the first merchant below.</p>'
+    )
+    alias = _e(str(merged_values.get("alias") or ""))
+    display_name = _e(str(merged_values.get("display_name") or ""))
+    gateway = _e(str(merged_values.get("gateway") or "nmi"))
+    base_url = _e(str(merged_values.get("base_url") or "https://mbcard.transactiongateway.com"))
+    api_required = "" if selected_entry else " required"
+    api_help = "Leave blank to keep the existing local secret." if selected_entry else "Required for a new merchant."
+    original_alias_input = f'<input type="hidden" name="original_alias" value="{_e(selected)}">' if selected else ""
+    alias_readonly = " readonly" if selected else ""
+    remove_form = (
+        f'<form method="post" action="/setup" data-testid="merchant-delete-form"><input type="hidden" name="action" value="delete"><input type="hidden" name="original_alias" value="{_e(selected)}"><button class="danger" type="submit">Remove merchant</button></form>'
+        if selected
+        else ""
+    )
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Merchant setup</title>
+<script>
+(function () {{
+  var storageKey = 'transactionSearchTheme';
+  var stored = 'system';
+  try {{ stored = localStorage.getItem(storageKey) || 'system'; }} catch (error) {{ stored = 'system'; }}
+  if (['light', 'dark', 'system'].indexOf(stored) === -1) {{ stored = 'system'; }}
+  var darkQuery = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+  var resolved = stored === 'system' ? (darkQuery && darkQuery.matches ? 'dark' : 'light') : stored;
+  document.documentElement.setAttribute('data-theme-mode', stored);
+  document.documentElement.setAttribute('data-theme', resolved);
+}}());
+</script>
+<style>
+:root{{color-scheme:light dark;--body-bg:#f8fafc;--panel:#ffffff;--ink:#142033;--muted:#475569;--line:#dbe5f0;--brand:#2458d3;--danger:#b91c1c;--note-bg:#eff6ff;--note-line:#bfdbfe;--control-bg:#ffffff;--control-text:#142033;}}
+:root[data-theme="dark"]{{color-scheme:dark;--body-bg:#0f172a;--panel:#111827;--ink:#f8fafc;--muted:#94a3b8;--line:#263244;--brand:#3b82f6;--danger:#dc2626;--note-bg:#10213d;--note-line:#1e3a8a;--control-bg:#0b1220;--control-text:#f8fafc;}}
+body{{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;background:var(--body-bg);color:var(--ink);}}
+main{{width:min(780px,calc(100% - 32px));margin:36px auto;}}
+section{{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:0 8px 22px rgba(15,23,42,.06);}}
+.page-tools{{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}}.nav-button,.button{{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:12px;padding:11px 14px;font-weight:850;background:var(--brand);color:white;text-decoration:none;cursor:pointer;}}
+.theme-control{{display:flex;align-items:center;gap:8px;margin-left:auto}}.theme-control label{{font-size:.78rem;font-weight:850;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}}
+form{{display:grid;gap:14px;margin-top:14px;}}label{{display:grid;gap:6px;font-weight:800;color:var(--muted);}}input,select{{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:12px;font:inherit;color:var(--control-text);background:var(--control-bg);}}button{{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:12px;padding:11px 14px;font-weight:850;background:var(--brand);color:white;text-decoration:none;cursor:pointer;}}button.danger{{background:var(--danger);}}.note{{background:var(--note-bg);border:1px solid var(--note-line);border-radius:14px;padding:12px 14px;}}.error{{color:var(--danger);font-weight:850;}}
+</style></head><body><main><div class="page-tools"><a class="nav-button" href="/">Search</a><div class="theme-control"><label for="themeSelect">Theme</label><select id="themeSelect" aria-label="Theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div><section>
+<h1>Merchant setup</h1>
+<p class="note">Add or update merchant gateway credentials. The browser wizard writes local config with a <code>local_secret_ref</code>; it does not write the raw API key to config.</p>
+{existing}
+{error_html}
+<form method="post" action="/setup" data-testid="merchant-setup-form">{original_alias_input}
+  <label>Merchant alias <input name="alias" value="{alias}" autocomplete="off" required{alias_readonly}></label>
+  <label>Merchant display name <input name="display_name" value="{display_name}" autocomplete="organization" required></label>
+  <label>Gateway <select name="gateway"><option value="{gateway}">NMI</option></select></label>
+  <label>Gateway base URL <input name="base_url" value="{base_url}" autocomplete="off" required></label>
+  <label>API/security key <input name="api_key" type="password" autocomplete="off"{api_required}><span>{_e(api_help)}</span></label>
+  <div><button type="submit">Save merchant setup</button> <a class="button" href="/">Back to search</a></div>
+</form>
+{remove_form}
+</section></main><script>
+(function () {{
+  function applyTheme(mode) {{ var darkQuery = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)'); var resolved = mode === 'system' ? (darkQuery && darkQuery.matches ? 'dark' : 'light') : mode; document.documentElement.setAttribute('data-theme-mode', mode); document.documentElement.setAttribute('data-theme', resolved); var select=document.getElementById('themeSelect'); if(select) select.value=mode; }}
+  var themeSelect=document.getElementById('themeSelect'); applyTheme(document.documentElement.getAttribute('data-theme-mode') || 'system'); if(themeSelect) {{ themeSelect.addEventListener('change', function() {{ try {{ localStorage.setItem('transactionSearchTheme', themeSelect.value); }} catch(error) {{}} applyTheme(themeSelect.value); }}); }}
+}}());
+</script></body></html>"""
+
+
+def render_update_confirmation(*, form: dict[str, Any], merchant_name: str, changes: list[tuple[str, str, str]]) -> str:
+    rows = ''.join(f'<li><strong>{_e(label)}</strong> for {_e(merchant_name)}: {_e(old)} → {_e(new)}</li>' for label, old, new in changes)
+    hidden = ''.join(f'<input type="hidden" name="{_e(key)}" value="{_e(value)}">' for key, value in form.items() if key != "confirm_update")
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Confirm merchant update</title>
+<style>body{{font-family:Inter,system-ui,sans-serif;margin:0;background:#f8fafc;color:#142033}}main{{width:min(760px,calc(100% - 32px));margin:36px auto}}section{{background:white;border:1px solid #dbe5f0;border-radius:18px;padding:22px}}.button,button{{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:12px;padding:11px 14px;font-weight:850;background:#2458d3;color:white;text-decoration:none;cursor:pointer}}.secondary{{background:#64748b}}</style></head><body><main><section>
+<h1>Confirm merchant update</h1><p>You are about to update the following fields for <strong>{_e(merchant_name)}</strong>:</p><ul>{rows}</ul>
+<form method="post" action="/setup">{hidden}<input type="hidden" name="confirm_update" value="yes"><button type="submit">Confirm update</button> <a class="button secondary" href="/setup?merchant={_e(str(form.get('alias') or ''))}">Cancel</a></form>
+</section></main></body></html>"""
+
+def render_delete_confirmation(*, alias: str, merchant_name: str) -> str:
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Confirm merchant removal</title>
+<style>body{{font-family:Inter,system-ui,sans-serif;margin:0;background:#f8fafc;color:#142033}}main{{width:min(760px,calc(100% - 32px));margin:36px auto}}section{{background:white;border:1px solid #dbe5f0;border-radius:18px;padding:22px}}.button,button{{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:12px;padding:11px 14px;font-weight:850;background:#2458d3;color:white;text-decoration:none;cursor:pointer}}.danger{{background:#b91c1c}}</style></head><body><main><section>
+<h1>Confirm merchant removal</h1><p>You are about to remove <strong>{_e(merchant_name)}</strong> ({_e(alias)}) from this local kit. Searches for this merchant will stop working until it is added again.</p>
+<form method="post" action="/setup"><input type="hidden" name="action" value="delete"><input type="hidden" name="original_alias" value="{_e(alias)}"><input type="hidden" name="confirm_delete" value="yes"><button class="danger" type="submit">Remove merchant</button> <a class="button" href="/setup?merchant={_e(alias)}">Cancel</a></form>
+</section></main></body></html>"""
+
+
+def delete_browser_setup(form: dict[str, Any], *, config_path: str | Path | None, secret_store_path: str | Path | None = None) -> dict[str, Any]:
+    alias = _clean(form.get("original_alias") or form.get("alias"))
+    confirmed = _clean(form.get("confirm_delete")) == "yes"
+    if not alias:
+        return {"status": "error", "error": "Merchant alias is required"}
+    config_file = Path(config_path or "~/.payment-search/config.json").expanduser()
+    secret_file = Path(secret_store_path).expanduser() if secret_store_path else default_secret_store_path()
+    config = cli_module._read_local_config(config_file)
+    merchants = config.setdefault("merchants", {})
+    existing = merchants.get(alias, {}) if isinstance(merchants.get(alias), dict) else {}
+    if not existing:
+        return {"status": "error", "error": "Merchant was not found"}
+    merchant_name = str(existing.get("display_name") or alias)
+    if not confirmed:
+        return {"status": "confirm_delete", "merchant_alias": alias, "merchant_name": merchant_name}
+    merchants.pop(alias, None)
+    if config.get("default_merchant") == alias:
+        remaining = sorted(merchants)
+        if remaining:
+            config["default_merchant"] = remaining[0]
+        else:
+            config.pop("default_merchant", None)
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    config_file.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        LocalSecretStore(secret_file).remove_secret("merchant", alias, "security_key")
+    except Exception:
+        pass
+    return {"status": "completed", "merchant_alias": alias}
+
+
+def save_browser_setup(form: dict[str, Any], *, config_path: str | Path | None, secret_store_path: str | Path | None = None) -> dict[str, Any]:
+    posted_alias = _clean(form.get("alias"))
+    original_alias = _clean(form.get("original_alias"))
+    alias = original_alias or posted_alias
+    display_name = _clean(form.get("display_name")) or alias
+    gateway = _clean(form.get("gateway")) or "nmi"
+    base_url = _clean(form.get("base_url")) or "https://mbcard.transactiongateway.com"
+    api_key = _clean(form.get("api_key"))
+    confirmed = _clean(form.get("confirm_update")) == "yes"
+    if not alias:
+        return {"status": "error", "error": "Merchant alias is required"}
+    if not display_name:
+        return {"status": "error", "error": "Merchant display name is required"}
+    if gateway != "nmi":
+        return {"status": "error", "error": "Gateway must be nmi"}
+
+    config_file = Path(config_path or "~/.payment-search/config.json").expanduser()
+    secret_file = Path(secret_store_path).expanduser() if secret_store_path else default_secret_store_path()
+    config = cli_module._read_local_config(config_file)
+    merchants = config.setdefault("merchants", {})
+    existing = merchants.get(alias, {}) if isinstance(merchants.get(alias), dict) else {}
+    if existing:
+        changes = _merchant_update_changes(existing, display_name=display_name or "", gateway=gateway, base_url=base_url, api_key_present=bool(api_key))
+        if changes and not confirmed:
+            return {"status": "confirm_update", "merchant_alias": alias, "merchant_name": existing.get("display_name") or alias, "changes": changes}
+    secret_ref = str(existing.get("local_secret_ref") or f"merchant/{alias}/security_key")
+    if api_key:
+        LocalSecretStore(secret_file).set_secret("merchant", alias, "security_key", api_key)
+    elif not existing.get("local_secret_ref"):
+        return {"status": "error", "error": "API key is required"}
+    merchants[alias] = {
+        "display_name": display_name,
+        "gateway": gateway,
+        "base_url": base_url,
+        "local_secret_ref": secret_ref,
+    }
+    config["default_merchant"] = alias
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    config_file.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {"status": "completed", "merchant_alias": alias}
+
+
+def _merchant_update_changes(existing: dict[str, Any], *, display_name: str, gateway: str, base_url: str, api_key_present: bool) -> list[tuple[str, str, str]]:
+    checks = [
+        ("display name", str(existing.get("display_name") or ""), display_name),
+        ("Gateway", str(existing.get("gateway") or "nmi"), gateway),
+        ("Gateway base URL", str(existing.get("base_url") or ""), base_url),
+    ]
+    changes = [(label, old, new) for label, old, new in checks if old != new]
+    if api_key_present:
+        changes.append(("API/security key", "existing local secret", "new local secret"))
+    return changes
+
+
+def _read_setup_config(config_path: str | Path | None) -> dict[str, Any]:
+    path = Path(config_path or "~/.payment-search/config.json").expanduser()
+    if not path.exists():
+        return {"merchants": {}}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"merchants": {}}
+    return data if isinstance(data, dict) else {"merchants": {}}
 
 def _safe_dashboard_identity(identity: dict[str, Any] | None) -> dict[str, str]:
     if not identity:
@@ -191,12 +404,12 @@ def _render_identity_panel(
     )
 
 
-def run_human_search_request(form: dict[str, Any], *, config_path: str | Path | None, gateway: str, timeout: int) -> dict[str, Any]:
+def run_human_search_request(form: dict[str, Any], *, config_path: str | Path | None, gateway: str, timeout: int, secret_store_path: str | Path | None = None) -> dict[str, Any]:
     validation = validate_search_request(form)
     if not validation.valid:
         return validation_error_response(validation)
     try:
-        merchant, security_key = _merchant_and_key(validation.normalized, config_path=config_path, gateway=gateway)
+        merchant, security_key = _merchant_and_key(validation.normalized, config_path=config_path, gateway=gateway, secret_store_path=secret_store_path)
     except Exception:
         return {"status": "error", "error": "credential_resolution_failed"}
     try:
@@ -213,16 +426,17 @@ def run_human_investigate_request(
     gateway: str,
     timeout: int,
     output_dir: str | Path,
+    secret_store_path: str | Path | None = None,
 ) -> dict[str, Any]:
     validation = validate_investigate_request(form)
     if not validation.valid:
         return validation_error_response(validation)
     try:
-        merchant, security_key = _merchant_and_key(validation.normalized, config_path=config_path, gateway=gateway)
+        merchant, security_key = _merchant_and_key(validation.normalized, config_path=config_path, gateway=gateway, secret_store_path=secret_store_path)
     except Exception:
         return {"status": "error", "error": "credential_resolution_failed"}
     try:
-        args = _search_args(validation.normalized, timeout=timeout)
+        args = _investigate_args(validation.normalized, timeout=timeout)
         args.output_dir = str(output_dir)
         args.case_id = _safe_case_id(form)
         args.title = "Transaction Search Detail"
@@ -244,7 +458,7 @@ def build_whoami_response(
     cloudflare_validator: CloudflareValidator | None = None,
 ) -> dict[str, Any]:
     if tenant_registry_path is None:
-        return {"status": "denied", "reason": "denied: registry_not_configured"}
+        return {"status": "ok", "identity": {"user_id": "local-operator", "role": "local_operator", "tenant_id": "local", "iso_id": None}, "authorized_merchants": []}
     registry = TenantRegistry(tenant_registry_path)
     extracted = extract_identity(
         headers,
@@ -346,7 +560,16 @@ def authorize_service_request(
     config_path: str | Path | None,
 ) -> dict[str, Any]:
     if tenant_registry_path is None:
-        return {"status": "denied", "reason": "denied: registry_not_configured"}
+        requested_merchant = _clean(payload.get("merchant_id") or payload.get("merchant"))
+        merchant_alias = resolve_default_merchant_alias(config_path, requested_merchant)
+        if not merchant_alias:
+            return {"status": "denied", "reason": "denied: merchant_required", "merchant_alias": requested_merchant}
+        try:
+            load_merchant_config(config_path, merchant_alias)
+        except Exception:
+            return {"status": "denied", "reason": "denied: unknown_merchant", "merchant_alias": merchant_alias}
+        identity = SimpleNamespace(user_id="local-operator", role="local_operator", tenant_id="local", iso_id=None)
+        return {"status": "ok", "identity": identity, "merchant_alias": merchant_alias}
     try:
         registry = TenantRegistry(tenant_registry_path)
     except Exception:
@@ -416,6 +639,18 @@ def resolve_artifact_request(
     cloudflare_validator: CloudflareValidator | None = None,
 ) -> dict[str, Any]:
     if tenant_registry_path is None:
+        store = ArtifactStore(artifact_root, ttl_seconds=LOCAL_ARTIFACT_TTL_SECONDS)
+        metadata = store.metadata(artifact_id)
+        if metadata.get("status") == "not_found":
+            return {"status": "not_found"}
+        merchant_alias = str(metadata.get("merchant_alias") or "")
+        result = store.resolve_for_access(artifact_id, owner_user_id="local-operator", tenant_id="local", merchant_alias=merchant_alias)
+        if result.status == "ok":
+            return {"status": "ok", "path": result.path, "record": result.record}
+        if result.status == "expired":
+            return {"status": "expired"}
+        if result.status == "not_found":
+            return {"status": "not_found"}
         return {"status": "denied"}
     try:
         registry = TenantRegistry(tenant_registry_path)
@@ -430,7 +665,7 @@ def resolve_artifact_request(
     )
     if not extracted.allowed or extracted.identity is None:
         return {"status": "denied"}
-    store = ArtifactStore(artifact_root, ttl_seconds=3600)
+    store = ArtifactStore(artifact_root, ttl_seconds=LOCAL_ARTIFACT_TTL_SECONDS if str(getattr(identity, "tenant_id", "")) == "local" else 3600)
     metadata = store.metadata(artifact_id)
     if metadata.get("status") == "not_found":
         return {"status": "not_found"}
@@ -486,7 +721,7 @@ def sanitize_investigate_response(result: dict[str, Any], authorization: dict[st
     if identity is None:
         return sanitized
     merchant_alias = str(authorization.get("merchant_alias") or "")
-    store = ArtifactStore(artifact_root, ttl_seconds=3600)
+    store = ArtifactStore(artifact_root, ttl_seconds=LOCAL_ARTIFACT_TTL_SECONDS if str(getattr(identity, "tenant_id", "")) == "local" else 3600)
     artifact_refs: dict[str, str] = {}
     for source_key, output_key, artifact_type in (
         ("dashboard_file", "dashboard_artifact_id", "dashboard"),
@@ -542,8 +777,8 @@ def _wants_html(headers: dict[str, str]) -> bool:
 
 
 def render_artifact_status_page(status: str) -> str:
-    title = "Transaction detail expired" if status == "expired" else "Transaction detail unavailable"
-    message = "This transaction detail link has expired. Return to search and open a fresh detail link." if status == "expired" else "This transaction detail is unavailable or you do not have access."
+    title = "Transaction detail unavailable"
+    message = "This transaction detail is unavailable or you do not have access."
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<title>{_e(title)}</title><style>:root{{color-scheme:light dark;--body-bg:linear-gradient(180deg,#f8fafc,#eef2f7);--panel:#ffffff;--ink:#142033;--muted:#64748b;--line:#dbe5f0;--brand:#2458d3}}'
@@ -551,7 +786,7 @@ def render_artifact_status_page(status: str) -> str:
         'body{margin:0;font-family:Inter,system-ui,sans-serif;background:var(--body-bg);color:var(--ink)}'
         'main{width:min(720px,calc(100% - 32px));margin:48px auto;padding:24px;background:var(--panel);border:1px solid var(--line);border-radius:18px}'
         'p{color:var(--muted)}a{display:inline-flex;margin-top:14px;padding:10px 14px;border-radius:12px;background:var(--brand);color:white;text-decoration:none;font-weight:850}</style></head><body><main>'
-        f'<h1>{_e(title)}</h1><p>{_e(message)}</p><p>Transaction detail links expire after 1 hour.</p><a data-testid="new-search-link" href="/">New search</a>'
+        f'<h1>{_e(title)}</h1><p>{_e(message)}</p><p>Local run history is retained on this machine until you purge local artifacts.</p><a data-testid="new-search-link" href="/">New search</a>'
         '</main></body></html>'
     )
 
@@ -568,6 +803,7 @@ def create_human_search_handler(
     dev_identity_enabled: bool = False,
     cloudflare_validator: CloudflareValidator | None = None,
     audit_path: str | Path | None = None,
+    secret_store_path: str | Path | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "Service"
@@ -597,6 +833,11 @@ def create_human_search_handler(
                     cloudflare_validator=cloudflare_validator,
                 )
                 self._send_bytes(200, rendered_page.encode("utf-8"), "text/html; charset=utf-8")
+                return
+            if parsed.path == "/setup":
+                selected = (parse_qs(parsed.query).get("merchant") or [""])[-1]
+                html_body = render_setup_wizard(config_path=config_path, selected_alias=selected)
+                self._send_bytes(200, html_body.encode("utf-8"), "text/html; charset=utf-8")
                 return
             if parsed.path.startswith("/api/artifacts/"):
                 artifact_id = unquote(parsed.path.removeprefix("/api/artifacts/"))
@@ -628,6 +869,36 @@ def create_human_search_handler(
 
         def do_POST(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
+            if parsed.path == "/setup":
+                try:
+                    payload = self._read_payload()
+                except json.JSONDecodeError:
+                    html_body = render_setup_wizard(error="Invalid setup request", config_path=config_path)
+                    self._send_bytes(400, html_body.encode("utf-8"), "text/html; charset=utf-8")
+                    return
+                if _clean(payload.get("action")) == "delete":
+                    result = delete_browser_setup(payload, config_path=config_path, secret_store_path=secret_store_path)
+                    if result.get("status") == "confirm_delete":
+                        html_body = render_delete_confirmation(alias=str(result.get("merchant_alias") or payload.get("original_alias") or ""), merchant_name=str(result.get("merchant_name") or payload.get("original_alias") or "merchant"))
+                        self._send_bytes(200, html_body.encode("utf-8"), "text/html; charset=utf-8")
+                        return
+                    if result.get("status") != "completed":
+                        html_body = render_setup_wizard(error=str(result.get("error") or "Delete failed"), config_path=config_path)
+                        self._send_bytes(400, html_body.encode("utf-8"), "text/html; charset=utf-8")
+                        return
+                    self._send_redirect("/setup")
+                    return
+                result = save_browser_setup(payload, config_path=config_path, secret_store_path=secret_store_path)
+                if result.get("status") == "confirm_update":
+                    html_body = render_update_confirmation(form=payload, merchant_name=str(result.get("merchant_name") or payload.get("alias") or "merchant"), changes=result.get("changes") or [])
+                    self._send_bytes(200, html_body.encode("utf-8"), "text/html; charset=utf-8")
+                    return
+                if result.get("status") != "completed":
+                    html_body = render_setup_wizard(error=str(result.get("error") or "Setup failed"), values=payload, config_path=config_path)
+                    self._send_bytes(400, html_body.encode("utf-8"), "text/html; charset=utf-8")
+                    return
+                self._send_redirect("/")
+                return
             if parsed.path not in ("/api/search", "/api/investigate"):
                 self._send_json(404, {"status": "error", "error": "Not found"})
                 return
@@ -675,12 +946,12 @@ def create_human_search_handler(
             request_started = time.perf_counter()
             if parsed.path == "/api/investigate":
                 result = sanitize_investigate_response(
-                    run_human_investigate_request(payload, config_path=config_path, gateway=gateway, timeout=timeout, output_dir=artifact_root),
+                    run_human_investigate_request(payload, config_path=config_path, gateway=gateway, timeout=timeout, output_dir=artifact_root, secret_store_path=secret_store_path),
                     authorization,
                     artifact_root=artifact_root,
                 )
             else:
-                result = sanitize_search_response(run_human_search_request(payload, config_path=config_path, gateway=gateway, timeout=timeout))
+                result = sanitize_search_response(run_human_search_request(payload, config_path=config_path, gateway=gateway, timeout=timeout, secret_store_path=secret_store_path))
             result["timing"] = {"server_ms": max(0, int((time.perf_counter() - request_started) * 1000))}
             try:
                 if result.get("status") == "error":
@@ -727,6 +998,13 @@ def create_human_search_handler(
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def _send_redirect(self, location: str) -> None:
+            self.send_response(303)
+            self.send_header("Location", location)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
     Handler.cloudflare_validator = cloudflare_validator  # type: ignore[attr-defined]
     return Handler
@@ -791,13 +1069,15 @@ def _build_runtime_cloudflare_validator(
         jwks_url=cloudflare_jwks_url,
     )
 
-def _merchant_and_key(form: dict[str, Any], *, config_path: str | Path | None, gateway: str) -> tuple[Any, str]:
+def _merchant_and_key(form: dict[str, Any], *, config_path: str | Path | None, gateway: str, secret_store_path: str | Path | None = None) -> tuple[Any, str]:
     merchant_alias = resolve_default_merchant_alias(config_path, _clean(form.get("merchant_id") or form.get("merchant")))
     if not merchant_alias:
         raise ValueError("Merchant is required unless a default merchant or single configured merchant exists.")
     merchant = load_merchant_config(config_path, merchant_alias)
     if merchant.gateway != gateway:
         raise ValueError(f"Merchant '{merchant.alias}' is configured for gateway '{merchant.gateway}', not '{gateway}'")
+    if secret_store_path and merchant.local_secret_ref:
+        return merchant, LocalSecretStore(secret_store_path).get_secret_ref(merchant.local_secret_ref)
     return merchant, resolve_security_key(merchant)
 
 
@@ -816,6 +1096,24 @@ def _search_args(form: dict[str, Any], *, timeout: int) -> Namespace:
         max_pages=int(_clean(form.get("max_pages")) or 5),
         timeout=timeout,
     )
+
+
+def _investigate_args(form: dict[str, Any], *, timeout: int) -> Namespace:
+    """Build detail args with a single gateway lookup key.
+
+    Browser row actions include supporting search fields from the form plus the
+    selected row identifiers. The gateway detail workflow must not receive both
+    transaction_id and order_id/amount because the lower query layer accepts a
+    single lookup key. Prefer the strongest selected-row identifier.
+    """
+    narrowed = dict(form)
+    if _clean(narrowed.get("transaction_id")):
+        for key in ("order_id", "amount", "start_date", "end_date", "action_type", "condition", "transaction_type"):
+            narrowed.pop(key, None)
+    elif _clean(narrowed.get("order_id")):
+        for key in ("amount", "action_type", "condition", "transaction_type"):
+            narrowed.pop(key, None)
+    return _search_args(narrowed, timeout=timeout)
 
 
 def _safe_case_id(form: dict[str, Any]) -> str:

@@ -317,7 +317,7 @@ def _handle_add_merchant(args: argparse.Namespace) -> int:
         }
         config["default_merchant"] = alias
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n")
+        config_path.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return _emit(
             {
                 "status": "completed",
@@ -369,7 +369,7 @@ def _payment_search_secret_store_path() -> Path:
 def _read_local_config(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {"merchants": {}}
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"Config root must be an object: {path}")
     merchants = data.setdefault("merchants", {})
@@ -915,7 +915,7 @@ def _emit_error(message: str, pretty: bool, *, code: int) -> int:
 
 
 def _read_json_file(path: str) -> dict[str, Any]:
-    payload = json.loads(Path(path).expanduser().read_text())
+    payload = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("case file must contain a JSON object")
     return payload
@@ -924,14 +924,14 @@ def _read_json_file(path: str) -> dict[str, Any]:
 def _write_text_file(path: str, content: str) -> str:
     output_path = Path(path).expanduser().resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(content)
+    output_path.write_text(content, encoding="utf-8")
     return str(output_path)
 
 
 def _write_detail_file(path: str, payload: dict[str, Any], pretty: bool) -> str:
     output_path = Path(path).expanduser().resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(payload, indent=2 if pretty else None, sort_keys=True) + "\n")
+    output_path.write_text(json.dumps(payload, indent=2 if pretty else None, sort_keys=True) + "\n", encoding="utf-8")
     return str(output_path)
 
 

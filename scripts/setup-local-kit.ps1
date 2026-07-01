@@ -11,7 +11,7 @@ if (-not (Test-Path $Venv)) {
 }
 
 & (Join-Path $Venv "Scripts\python.exe") -m pip install --upgrade pip
-& (Join-Path $Venv "Scripts\python.exe") -m pip install -e .
+& (Join-Path $Venv "Scripts\python.exe") -m pip install -e . pytest
 
 Write-Host "Payment Search local kit is installed."
 Write-Host "Next:"

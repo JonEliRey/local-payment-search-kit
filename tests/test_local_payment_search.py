@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -142,6 +143,12 @@ class PaymentSearchAddMerchantTests(unittest.TestCase):
 
 
 class PaymentSearchStartTests(unittest.TestCase):
+    def test_start_command_defaults_to_stable_local_port(self):
+        parser = cli.build_parser()
+        args = parser.parse_args(["start"])
+
+        self.assertEqual(args.port, 8787)
+
     def test_dashboard_without_configured_merchants_shows_setup_required_guidance(self):
         from payment_evidence.web_dashboard import render_human_search_dashboard
 
@@ -180,6 +187,61 @@ class PaymentSearchStartTests(unittest.TestCase):
         self.assertNotIn("Setup required", html)
 
 
+
+
+class PaymentSearchDashboardArtifactTests(unittest.TestCase):
+    def test_transaction_detail_page_has_merchants_button(self):
+        from payment_evidence.dashboard import render_dashboard_html
+
+        html = render_dashboard_html(
+            {
+                "status": "completed",
+                "merchant": {"display_name": "Suddergoose LLC"},
+                "transactions": [{"transaction_id": "txn_123", "order_id": "ord_123", "amount": "10.00"}],
+                "history_summary": {},
+                "search_context": {"merchant_id": "suddergoose-llc", "transaction_id": "txn_123"},
+            }
+        )
+
+        self.assertIn('data-testid="merchant-management-link"', html)
+        self.assertIn('href="/setup"', html)
+        self.assertIn("Merchants", html)
+
+
+    def test_transaction_detail_artifacts_write_unicode_as_utf8(self):
+        from payment_evidence.cli import _read_json_file, _write_detail_file, _write_text_file
+
+        original_write_text = Path.write_text
+        original_read_text = Path.read_text
+
+        def cp1252_sensitive_write(path, data, *args, **kwargs):  # noqa: ANN001
+            if kwargs.get("encoding") != "utf-8":
+                raise UnicodeEncodeError("charmap", "✓", 0, 1, "character maps to <undefined>")
+            return original_write_text(path, data, *args, **kwargs)
+
+        def cp1252_sensitive_read(path, *args, **kwargs):  # noqa: ANN001
+            if kwargs.get("encoding") != "utf-8":
+                raise UnicodeDecodeError("charmap", b"\x9d", 0, 1, "character maps to <undefined>")
+            return original_read_text(path, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            html_path = root / "detail.html"
+            json_path = root / "detail.json"
+            case_path = root / "case.json"
+            case_path.write_bytes('{"status":"completed","note":"Approved ✓ — café"}\n'.encode("utf-8"))
+
+            with patch.object(Path, "write_text", cp1252_sensitive_write):
+                _write_text_file(str(html_path), "<p>Approved ✓ — café</p>")
+                _write_detail_file(str(json_path), {"status": "completed", "note": "Approved ✓ — café"}, pretty=True)
+
+            with patch.object(Path, "read_text", cp1252_sensitive_read):
+                case = _read_json_file(str(case_path))
+
+            self.assertEqual(html_path.read_bytes(), "<p>Approved ✓ — café</p>".encode("utf-8"))
+            self.assertIn('"note": "Approved \\u2713 \\u2014 caf\\u00e9"', json_path.read_text(encoding="utf-8"))
+            self.assertEqual(case["note"], "Approved ✓ — café")
+
 class PaymentSearchDocsTests(unittest.TestCase):
     def test_public_docs_teach_payment_search_commands_and_not_legacy_cli(self):
         doc_paths = [ROOT / "README.md", ROOT / "QUICKSTART.md", ROOT / "AGENT_RUNBOOK.md"]
@@ -191,6 +253,19 @@ class PaymentSearchDocsTests(unittest.TestCase):
             self.assertIn("payment-search start", text)
             self.assertNotIn("payment-" + "evidence add-merchant", text)
             self.assertNotIn("payment-" + "evidence start", text)
+
+    def test_public_docs_make_browser_setup_wizard_the_primary_human_path(self):
+        readme = (ROOT / "README.md").read_text()
+        quickstart = (ROOT / "QUICKSTART.md").read_text()
+        agent_runbook = (ROOT / "AGENT_RUNBOOK.md").read_text()
+        copilot_test = (ROOT / "COPILOT_AGENT_TEST.md").read_text()
+
+        self.assertIn("browser setup wizard", readme.lower())
+        self.assertIn("/setup", quickstart)
+        self.assertIn("Humans use the browser setup wizard", agent_runbook)
+        self.assertIn("Agents may use `payment-search add-merchant`", agent_runbook)
+        self.assertIn("/setup", copilot_test)
+        self.assertIn("synthetic-browser-test-key", copilot_test)
 
     def test_setup_and_start_wrappers_are_payment_search_only(self):
         script_paths = [
@@ -204,6 +279,54 @@ class PaymentSearchDocsTests(unittest.TestCase):
             text = path.read_text()
             self.assertIn("payment-search", text)
             self.assertNotIn("payment-evidence", text)
+
+    def test_setup_wrappers_install_pytest_for_uat_verification(self):
+        unix_setup = (ROOT / "scripts/setup-local-kit.sh").read_text()
+        windows_setup = (ROOT / "scripts/setup-local-kit.ps1").read_text()
+
+        self.assertIn("python -m pip install -e . pytest", unix_setup)
+        self.assertIn("-m pip install -e . pytest", windows_setup)
+
+    def test_double_click_launcher_files_exist_and_call_existing_scripts(self):
+        launcher = ROOT / "scripts/local-kit-launcher.py"
+        windows = ROOT / "START_LOCAL_KIT.bat"
+        unix = ROOT / "START_LOCAL_KIT.command"
+
+        self.assertTrue(launcher.exists())
+        self.assertTrue(windows.exists())
+        self.assertTrue(unix.exists())
+        launcher_text = launcher.read_text()
+        self.assertIn("tkinter", launcher_text)
+        self.assertIn("setup-local-kit", launcher_text)
+        self.assertIn("start-dashboard", launcher_text)
+        self.assertIn("pytest -q", launcher_text)
+        self.assertIn("local-kit-launcher.py", windows.read_text())
+        self.assertIn("local-kit-launcher.py", unix.read_text())
+
+
+    def test_double_click_launcher_uses_stable_default_port(self):
+        launcher = ROOT / "scripts/local-kit-launcher.py"
+        text = launcher.read_text()
+
+        self.assertIn("start-dashboard", text)
+        self.assertNotIn('"--port", "0"', text)
+
+    def test_launcher_import_does_not_require_tkinter(self):
+        launcher = ROOT / "scripts/local-kit-launcher.py"
+        code = (
+            "import builtins, runpy\n"
+            "real_import = builtins.__import__\n"
+            "def fake_import(name, *args, **kwargs):\n"
+            "    if name == 'tkinter' or name.startswith('tkinter.'):\n"
+            "        raise ModuleNotFoundError(\"No module named 'tkinter'\")\n"
+            "    return real_import(name, *args, **kwargs)\n"
+            "builtins.__import__ = fake_import\n"
+            f"module = runpy.run_path({str(launcher)!r}, run_name='launcher_test')\n"
+            "assert module['command_for']('test')\n"
+        )
+        result = subprocess.run([sys.executable, "-c", code], cwd=ROOT, text=True, capture_output=True)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

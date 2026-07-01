@@ -45,14 +45,16 @@ Run:
 
 ```bash
 pytest -q
-python3 -m compileall -q src tests
-bash -n scripts/setup-local-kit.sh scripts/start-dashboard.sh
+python3 -m compileall -q src tests scripts/local-kit-launcher.py
+bash -n scripts/setup-local-kit.sh scripts/start-dashboard.sh START_LOCAL_KIT.command
 payment-search --help
 payment-search add-merchant --help
 payment-search start --help
 ```
 
 For setup-flow changes, also run a fake-key smoke that proves the raw key is not written to config or printed to output.
+
+For transaction-detail/artifact changes, include Windows-safe UTF-8 coverage. App-owned text and JSON reads/writes must pass `encoding="utf-8"` explicitly.
 
 ## CLI contract
 
