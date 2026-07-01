@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -142,6 +143,12 @@ class PaymentSearchAddMerchantTests(unittest.TestCase):
 
 
 class PaymentSearchStartTests(unittest.TestCase):
+    def test_start_command_defaults_to_ephemeral_port_to_avoid_collisions(self):
+        parser = cli.build_parser()
+        args = parser.parse_args(["start"])
+
+        self.assertEqual(args.port, 0)
+
     def test_dashboard_without_configured_merchants_shows_setup_required_guidance(self):
         from payment_evidence.web_dashboard import render_human_search_dashboard
 
@@ -240,6 +247,23 @@ class PaymentSearchDocsTests(unittest.TestCase):
         self.assertIn("pytest -q", launcher_text)
         self.assertIn("local-kit-launcher.py", windows.read_text())
         self.assertIn("local-kit-launcher.py", unix.read_text())
+
+    def test_launcher_import_does_not_require_tkinter(self):
+        launcher = ROOT / "scripts/local-kit-launcher.py"
+        code = (
+            "import builtins, runpy\n"
+            "real_import = builtins.__import__\n"
+            "def fake_import(name, *args, **kwargs):\n"
+            "    if name == 'tkinter' or name.startswith('tkinter.'):\n"
+            "        raise ModuleNotFoundError(\"No module named 'tkinter'\")\n"
+            "    return real_import(name, *args, **kwargs)\n"
+            "builtins.__import__ = fake_import\n"
+            f"module = runpy.run_path({str(launcher)!r}, run_name='launcher_test')\n"
+            "assert module['command_for']('test')\n"
+        )
+        result = subprocess.run([sys.executable, "-c", code], cwd=ROOT, text=True, capture_output=True)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":
