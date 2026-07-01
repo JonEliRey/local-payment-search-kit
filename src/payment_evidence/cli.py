@@ -143,7 +143,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     start = sub.add_parser("start", help="Start the local Payment Search browser app")
     start.add_argument("--host", default="127.0.0.1")
-    start.add_argument("--port", type=int, default=0)
+    start.add_argument("--port", type=int, default=8787)
     start.add_argument("--output-dir", help="Private local directory for browser-generated transaction detail artifacts")
     start.add_argument("--pretty", action="store_true", help=argparse.SUPPRESS)
 

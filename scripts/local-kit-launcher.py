@@ -16,7 +16,7 @@ def command_for(action: str) -> list[str]:
     if action == "install":
         return ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "scripts" / "setup-local-kit.ps1")] if IS_WINDOWS else ["bash", str(ROOT / "scripts" / "setup-local-kit.sh")]
     if action == "start":
-        return ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "scripts" / "start-dashboard.ps1"), "--port", "0"] if IS_WINDOWS else ["bash", str(ROOT / "scripts" / "start-dashboard.sh"), "--port", "0"]
+        return ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "scripts" / "start-dashboard.ps1")] if IS_WINDOWS else ["bash", str(ROOT / "scripts" / "start-dashboard.sh")]
     if action == "test":
         if IS_WINDOWS:
             return [str(ROOT / ".venv" / "Scripts" / "python.exe"), "-m", "pytest", "-q"]

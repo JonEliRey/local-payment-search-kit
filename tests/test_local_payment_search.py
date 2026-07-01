@@ -143,11 +143,11 @@ class PaymentSearchAddMerchantTests(unittest.TestCase):
 
 
 class PaymentSearchStartTests(unittest.TestCase):
-    def test_start_command_defaults_to_ephemeral_port_to_avoid_collisions(self):
+    def test_start_command_defaults_to_stable_local_port(self):
         parser = cli.build_parser()
         args = parser.parse_args(["start"])
 
-        self.assertEqual(args.port, 0)
+        self.assertEqual(args.port, 8787)
 
     def test_dashboard_without_configured_merchants_shows_setup_required_guidance(self):
         from payment_evidence.web_dashboard import render_human_search_dashboard
@@ -267,6 +267,14 @@ class PaymentSearchDocsTests(unittest.TestCase):
         self.assertIn("pytest -q", launcher_text)
         self.assertIn("local-kit-launcher.py", windows.read_text())
         self.assertIn("local-kit-launcher.py", unix.read_text())
+
+
+    def test_double_click_launcher_uses_stable_default_port(self):
+        launcher = ROOT / "scripts/local-kit-launcher.py"
+        text = launcher.read_text()
+
+        self.assertIn("start-dashboard", text)
+        self.assertNotIn('"--port", "0"', text)
 
     def test_launcher_import_does_not_require_tkinter(self):
         launcher = ROOT / "scripts/local-kit-launcher.py"
