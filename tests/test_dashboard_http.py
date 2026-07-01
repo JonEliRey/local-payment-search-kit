@@ -9,6 +9,7 @@ import urllib.parse
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
 
 TENANT_CONFIG = {
@@ -122,6 +123,114 @@ class TenantScopedDashboardHttpTests(unittest.TestCase):
         self.assertFalse(config_path.exists())
         self.assertFalse(secret_store_path.exists())
 
+
+    def test_local_mode_search_authorizes_configured_merchant_without_registry(self):
+        with _dashboard_server(tenant_registry=False) as server:
+            _post_form(
+                server.base_url + "/setup",
+                {
+                    "alias": "suddergoose-llc",
+                    "display_name": "Suddergoose LLC",
+                    "gateway": "nmi",
+                    "base_url": "https://mbcard.transactiongateway.com",
+                    "api_key": "synthetic-local-search-key",
+                },
+            )
+            with patch("payment_evidence.cli._run_search") as run_search:
+                run_search.return_value = {
+                    "status": "completed",
+                    "merchant": "suddergoose-llc",
+                    "candidate_summary": {"candidate_count": 0, "top_score": 0, "ambiguous": False},
+                    "candidates": [],
+                }
+                response = _post_json(
+                    server.base_url + "/api/search",
+                    {
+                        "merchant_id": "suddergoose-llc",
+                        "start_date": "2026-06-01",
+                        "end_date": "2026-06-02",
+                        "amount": "10.00",
+                    },
+                )
+
+        self.assertEqual(response["status"], 200)
+        self.assertNotEqual(response["json"].get("status"), "denied")
+        run_search.assert_called_once()
+
+    def test_local_mode_search_denies_unknown_merchant_before_gateway(self):
+        with _dashboard_server(tenant_registry=False) as server:
+            _post_form(
+                server.base_url + "/setup",
+                {
+                    "alias": "known-merchant",
+                    "display_name": "Known Merchant",
+                    "gateway": "nmi",
+                    "base_url": "https://mbcard.transactiongateway.com",
+                    "api_key": "synthetic-known-key",
+                },
+            )
+            with patch("payment_evidence.cli._run_search") as run_search:
+                response = _post_json(
+                    server.base_url + "/api/search",
+                    {
+                        "merchant_id": "unknown-merchant",
+                        "start_date": "2026-06-01",
+                        "end_date": "2026-06-02",
+                        "amount": "10.00",
+                    },
+                )
+
+        self.assertEqual(response["status"], 403)
+        self.assertEqual(response["json"].get("status"), "denied")
+        self.assertIn("unknown", response["json"].get("reason", ""))
+        run_search.assert_not_called()
+
+    def test_setup_wizard_selects_existing_merchant_and_preserves_key_when_blank(self):
+        with _dashboard_server(tenant_registry=False) as server:
+            _post_form(
+                server.base_url + "/setup",
+                {
+                    "alias": "suddergoose-llc",
+                    "display_name": "Suddergoose LLC",
+                    "gateway": "nmi",
+                    "base_url": "https://mbcard.transactiongateway.com",
+                    "api_key": "original-secret-key",
+                },
+            )
+            setup_html = _get_text(server.base_url + "/setup?merchant=suddergoose-llc")
+            response = _post_form(
+                server.base_url + "/setup",
+                {
+                    "alias": "suddergoose-llc",
+                    "display_name": "Suddergoose LLC Updated",
+                    "gateway": "nmi",
+                    "base_url": "https://example-gateway.local",
+                    "api_key": "",
+                },
+            )
+            config = json.loads(server.config_path.read_text())
+            secret = server.secret_store_path.read_text()
+
+        self.assertIn("Existing merchants", setup_html)
+        self.assertIn('value="suddergoose-llc" selected', setup_html)
+        self.assertIn('value="Suddergoose LLC"', setup_html)
+        self.assertNotIn("original-secret-key", setup_html)
+        self.assertEqual(response["status"], 303)
+        merchant = config["merchants"]["suddergoose-llc"]
+        self.assertEqual(merchant["display_name"], "Suddergoose LLC Updated")
+        self.assertEqual(merchant["base_url"], "https://example-gateway.local")
+        self.assertIn("original-secret-key", secret)
+
+    def test_search_page_has_merchants_navigation_and_local_retention_copy(self):
+        with _dashboard_server(tenant_registry=False) as server:
+            html = _get_text(server.base_url + "/")
+
+        self.assertIn('href="/"', html)
+        self.assertIn('href="/setup"', html)
+        self.assertIn("Merchants", html)
+        self.assertIn("local run history", html.lower())
+        self.assertNotIn("expire after 1 hour", html.lower())
+
     def assert_safe(self, html: str) -> None:
         lowered = html.lower()
         for forbidden in ("fake-secret-token", "op" + "://", "/home" + "/nova", "config_path", "tenant_registry_path", "4111111111111111", "cvv"):
@@ -201,6 +310,21 @@ def _post_form(url: str, payload: dict[str, str]) -> dict[str, int | str | None]
             "location": exc.headers.get("Location"),
             "body": exc.read().decode("utf-8"),
         }
+
+
+def _post_json(url: str, payload: dict[str, str]) -> dict[str, object]:
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return {"status": response.status, "json": json.loads(response.read().decode("utf-8"))}
+    except urllib.error.HTTPError as exc:
+        return {"status": exc.code, "json": json.loads(exc.read().decode("utf-8"))}
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):

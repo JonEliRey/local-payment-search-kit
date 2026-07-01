@@ -225,6 +225,22 @@ class PaymentSearchDocsTests(unittest.TestCase):
         self.assertIn("python -m pip install -e . pytest", unix_setup)
         self.assertIn("-m pip install -e . pytest", windows_setup)
 
+    def test_double_click_launcher_files_exist_and_call_existing_scripts(self):
+        launcher = ROOT / "scripts/local-kit-launcher.py"
+        windows = ROOT / "START_LOCAL_KIT.bat"
+        unix = ROOT / "START_LOCAL_KIT.command"
+
+        self.assertTrue(launcher.exists())
+        self.assertTrue(windows.exists())
+        self.assertTrue(unix.exists())
+        launcher_text = launcher.read_text()
+        self.assertIn("tkinter", launcher_text)
+        self.assertIn("setup-local-kit", launcher_text)
+        self.assertIn("start-dashboard", launcher_text)
+        self.assertIn("pytest -q", launcher_text)
+        self.assertIn("local-kit-launcher.py", windows.read_text())
+        self.assertIn("local-kit-launcher.py", unix.read_text())
+
 
 if __name__ == "__main__":
     unittest.main()

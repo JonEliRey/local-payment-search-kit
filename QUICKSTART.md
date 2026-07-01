@@ -4,6 +4,15 @@ Use this path for a local, authorized Transaction Search setup.
 
 ## 1. Install or update the local kit
 
+Easiest path:
+
+- Windows: double-click `START_LOCAL_KIT.bat`
+- macOS/Linux desktop: double-click `START_LOCAL_KIT.command` where supported, or run it from Terminal
+
+Choose **Install / Update** in the launcher.
+
+Command-line path:
+
 Unix/macOS:
 
 ```bash
@@ -17,6 +26,10 @@ Windows PowerShell:
 ```
 
 ## 2. Start the browser app
+
+In the launcher, choose **Start Browser App**.
+
+Command-line path:
 
 ```bash
 payment-search start

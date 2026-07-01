@@ -6,6 +6,13 @@ Humans use the browser setup wizard for first-run setup. Agents may use `payment
 
 ## Allowed local commands
 
+For non-technical humans, prefer the double-click launcher:
+
+- `START_LOCAL_KIT.bat` on Windows
+- `START_LOCAL_KIT.command` on macOS/Linux desktop environments that support double-click shell launchers
+
+Agents should still use deterministic commands for verification and scripted support.
+
 Use these for normal support:
 
 ```bash

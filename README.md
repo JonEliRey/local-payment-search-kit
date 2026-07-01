@@ -42,6 +42,13 @@ python -m pip install -e . pytest
 
 Or use the setup wrappers:
 
+Double-click launcher:
+
+- Windows: double-click `START_LOCAL_KIT.bat`
+- macOS/Linux desktop: double-click `START_LOCAL_KIT.command` where supported, or run it from Terminal
+
+The launcher lets you choose Install / Update, Start Browser App, or Run Tests without copying commands.
+
 ```bash
 ./scripts/setup-local-kit.sh
 ```
