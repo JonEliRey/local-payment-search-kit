@@ -46,7 +46,7 @@ class TenantRegistry:
 
     def __init__(self, config_path: str | Path) -> None:
         path = Path(config_path).expanduser()
-        raw = json.loads(path.read_text())
+        raw = json.loads(path.read_text(encoding="utf-8"))
         self._path = path
         self._data = self._validate(raw)
 

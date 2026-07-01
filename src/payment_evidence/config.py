@@ -37,7 +37,7 @@ def load_merchant_config(config_path: str | Path | None, alias: str) -> Merchant
     path = _resolve_config_path(config_path)
     data: dict[str, Any] = {}
     if path.exists():
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     merchants = data.get("merchants", {})
     if alias not in merchants:
         available = ", ".join(sorted(merchants)) or "none"
@@ -67,7 +67,7 @@ def resolve_default_merchant_alias(config_path: str | Path | None, alias: str | 
     path = _resolve_config_path(config_path)
     if not path.exists():
         return None
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     if data.get("default_merchant"):
         return data["default_merchant"]
     merchants = data.get("merchants", {})
@@ -80,5 +80,5 @@ def load_configured_aliases(config_path: str | Path | None) -> list[str]:
     path = _resolve_config_path(config_path)
     if not path.exists():
         return []
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     return sorted(data.get("merchants", {}).keys())

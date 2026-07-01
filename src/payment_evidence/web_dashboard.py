@@ -296,7 +296,7 @@ def delete_browser_setup(form: dict[str, Any], *, config_path: str | Path | None
         else:
             config.pop("default_merchant", None)
     config_file.parent.mkdir(parents=True, exist_ok=True)
-    config_file.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n")
+    config_file.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     try:
         LocalSecretStore(secret_file).remove_secret("merchant", alias, "security_key")
     except Exception:
@@ -342,7 +342,7 @@ def save_browser_setup(form: dict[str, Any], *, config_path: str | Path | None, 
     }
     config["default_merchant"] = alias
     config_file.parent.mkdir(parents=True, exist_ok=True)
-    config_file.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n")
+    config_file.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return {"status": "completed", "merchant_alias": alias}
 
 
@@ -363,7 +363,7 @@ def _read_setup_config(config_path: str | Path | None) -> dict[str, Any]:
     if not path.exists():
         return {"merchants": {}}
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {"merchants": {}}
     return data if isinstance(data, dict) else {"merchants": {}}

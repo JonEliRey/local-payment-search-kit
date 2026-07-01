@@ -114,7 +114,7 @@ class LocalSecretStore:
         if not self.path.exists():
             return {"version": 1, "secrets": {}}
         try:
-            data = json.loads(self.path.read_text())
+            data = json.loads(self.path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise SecretStoreError(f"Secret store is not valid JSON: {self.path}") from exc
         if not isinstance(data, dict):
@@ -128,7 +128,7 @@ class LocalSecretStore:
     def _write_data(self, data: dict[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp_path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+        tmp_path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         os.chmod(tmp_path, 0o600)
         tmp_path.replace(self.path)
         os.chmod(self.path, 0o600)

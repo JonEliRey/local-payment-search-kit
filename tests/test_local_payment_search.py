@@ -207,6 +207,41 @@ class PaymentSearchDashboardArtifactTests(unittest.TestCase):
         self.assertIn('href="/setup"', html)
         self.assertIn("Merchants", html)
 
+
+    def test_transaction_detail_artifacts_write_unicode_as_utf8(self):
+        from payment_evidence.cli import _read_json_file, _write_detail_file, _write_text_file
+
+        original_write_text = Path.write_text
+        original_read_text = Path.read_text
+
+        def cp1252_sensitive_write(path, data, *args, **kwargs):  # noqa: ANN001
+            if kwargs.get("encoding") != "utf-8":
+                raise UnicodeEncodeError("charmap", "✓", 0, 1, "character maps to <undefined>")
+            return original_write_text(path, data, *args, **kwargs)
+
+        def cp1252_sensitive_read(path, *args, **kwargs):  # noqa: ANN001
+            if kwargs.get("encoding") != "utf-8":
+                raise UnicodeDecodeError("charmap", b"\x9d", 0, 1, "character maps to <undefined>")
+            return original_read_text(path, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            html_path = root / "detail.html"
+            json_path = root / "detail.json"
+            case_path = root / "case.json"
+            case_path.write_bytes('{"status":"completed","note":"Approved ✓ — café"}\n'.encode("utf-8"))
+
+            with patch.object(Path, "write_text", cp1252_sensitive_write):
+                _write_text_file(str(html_path), "<p>Approved ✓ — café</p>")
+                _write_detail_file(str(json_path), {"status": "completed", "note": "Approved ✓ — café"}, pretty=True)
+
+            with patch.object(Path, "read_text", cp1252_sensitive_read):
+                case = _read_json_file(str(case_path))
+
+            self.assertEqual(html_path.read_bytes(), "<p>Approved ✓ — café</p>".encode("utf-8"))
+            self.assertIn('"note": "Approved \\u2713 \\u2014 caf\\u00e9"', json_path.read_text(encoding="utf-8"))
+            self.assertEqual(case["note"], "Approved ✓ — café")
+
 class PaymentSearchDocsTests(unittest.TestCase):
     def test_public_docs_teach_payment_search_commands_and_not_legacy_cli(self):
         doc_paths = [ROOT / "README.md", ROOT / "QUICKSTART.md", ROOT / "AGENT_RUNBOOK.md"]
