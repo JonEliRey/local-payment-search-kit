@@ -187,6 +187,26 @@ class PaymentSearchStartTests(unittest.TestCase):
         self.assertNotIn("Setup required", html)
 
 
+
+
+class PaymentSearchDashboardArtifactTests(unittest.TestCase):
+    def test_transaction_detail_page_has_merchants_button(self):
+        from payment_evidence.dashboard import render_dashboard_html
+
+        html = render_dashboard_html(
+            {
+                "status": "completed",
+                "merchant": {"display_name": "Suddergoose LLC"},
+                "transactions": [{"transaction_id": "txn_123", "order_id": "ord_123", "amount": "10.00"}],
+                "history_summary": {},
+                "search_context": {"merchant_id": "suddergoose-llc", "transaction_id": "txn_123"},
+            }
+        )
+
+        self.assertIn('data-testid="merchant-management-link"', html)
+        self.assertIn('href="/setup"', html)
+        self.assertIn("Merchants", html)
+
 class PaymentSearchDocsTests(unittest.TestCase):
     def test_public_docs_teach_payment_search_commands_and_not_legacy_cli(self):
         doc_paths = [ROOT / "README.md", ROOT / "QUICKSTART.md", ROOT / "AGENT_RUNBOOK.md"]

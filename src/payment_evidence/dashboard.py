@@ -137,6 +137,7 @@ def render_dashboard_html(case_payload: dict[str, Any], *, title: str = "Transac
 <div class="page-tools">
   <a class="primary-btn" data-testid="new-search-link" href="/">New search</a>
   {adjust_search_link}
+  <a class="primary-btn" data-testid="merchant-management-link" href="/setup">Merchants</a>
   <button class="primary-btn" type="button" onclick="printDashboard()">Print transaction detail</button>
   <div class="theme-control" role="group" aria-label="Theme">
     <label for="themeSelect">Theme</label>

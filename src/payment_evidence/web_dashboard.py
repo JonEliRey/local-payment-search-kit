@@ -172,7 +172,7 @@ def render_setup_wizard(
 ) -> str:
     config = _read_setup_config(config_path)
     merchants = config.get("merchants", {}) if isinstance(config.get("merchants"), dict) else {}
-    selected = _clean(selected_alias) or _clean((values or {}).get("selected_alias")) or ""
+    selected = _clean(selected_alias) or _clean((values or {}).get("original_alias")) or _clean((values or {}).get("selected_alias")) or ""
     selected_entry = merchants.get(selected, {}) if selected else {}
     merged_values = {
         "alias": selected or "",
@@ -203,29 +203,57 @@ def render_setup_wizard(
     base_url = _e(str(merged_values.get("base_url") or "https://mbcard.transactiongateway.com"))
     api_required = "" if selected_entry else " required"
     api_help = "Leave blank to keep the existing local secret." if selected_entry else "Required for a new merchant."
+    original_alias_input = f'<input type="hidden" name="original_alias" value="{_e(selected)}">' if selected else ""
+    alias_readonly = " readonly" if selected else ""
+    remove_form = (
+        f'<form method="post" action="/setup" data-testid="merchant-delete-form"><input type="hidden" name="action" value="delete"><input type="hidden" name="original_alias" value="{_e(selected)}"><button class="danger" type="submit">Remove merchant</button></form>'
+        if selected
+        else ""
+    )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Merchant setup</title>
+<script>
+(function () {{
+  var storageKey = 'transactionSearchTheme';
+  var stored = 'system';
+  try {{ stored = localStorage.getItem(storageKey) || 'system'; }} catch (error) {{ stored = 'system'; }}
+  if (['light', 'dark', 'system'].indexOf(stored) === -1) {{ stored = 'system'; }}
+  var darkQuery = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+  var resolved = stored === 'system' ? (darkQuery && darkQuery.matches ? 'dark' : 'light') : stored;
+  document.documentElement.setAttribute('data-theme-mode', stored);
+  document.documentElement.setAttribute('data-theme', resolved);
+}}());
+</script>
 <style>
-body{{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;background:#f8fafc;color:#142033;}}
+:root{{color-scheme:light dark;--body-bg:#f8fafc;--panel:#ffffff;--ink:#142033;--muted:#475569;--line:#dbe5f0;--brand:#2458d3;--danger:#b91c1c;--note-bg:#eff6ff;--note-line:#bfdbfe;--control-bg:#ffffff;--control-text:#142033;}}
+:root[data-theme="dark"]{{color-scheme:dark;--body-bg:#0f172a;--panel:#111827;--ink:#f8fafc;--muted:#94a3b8;--line:#263244;--brand:#3b82f6;--danger:#dc2626;--note-bg:#10213d;--note-line:#1e3a8a;--control-bg:#0b1220;--control-text:#f8fafc;}}
+body{{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;background:var(--body-bg);color:var(--ink);}}
 main{{width:min(780px,calc(100% - 32px));margin:36px auto;}}
-section{{background:white;border:1px solid #dbe5f0;border-radius:18px;padding:22px;box-shadow:0 8px 22px rgba(15,23,42,.06);}}
-nav{{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}}.nav-button,.button{{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:12px;padding:11px 14px;font-weight:850;background:#2458d3;color:white;text-decoration:none;cursor:pointer;}}
-form{{display:grid;gap:14px;}}label{{display:grid;gap:6px;font-weight:800;color:#475569;}}input,select{{width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;font:inherit;}}button{{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:12px;padding:11px 14px;font-weight:850;background:#2458d3;color:white;text-decoration:none;cursor:pointer;}}.note{{background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:12px 14px;}}.error{{color:#b91c1c;font-weight:850;}}
-</style></head><body><main><nav aria-label="Primary"><a class="nav-button" href="/">Search</a><a class="nav-button" href="/setup">Merchants</a></nav><section>
+section{{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;box-shadow:0 8px 22px rgba(15,23,42,.06);}}
+.page-tools{{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}}.nav-button,.button{{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:12px;padding:11px 14px;font-weight:850;background:var(--brand);color:white;text-decoration:none;cursor:pointer;}}
+.theme-control{{display:flex;align-items:center;gap:8px;margin-left:auto}}.theme-control label{{font-size:.78rem;font-weight:850;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}}
+form{{display:grid;gap:14px;margin-top:14px;}}label{{display:grid;gap:6px;font-weight:800;color:var(--muted);}}input,select{{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:12px;font:inherit;color:var(--control-text);background:var(--control-bg);}}button{{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:12px;padding:11px 14px;font-weight:850;background:var(--brand);color:white;text-decoration:none;cursor:pointer;}}button.danger{{background:var(--danger);}}.note{{background:var(--note-bg);border:1px solid var(--note-line);border-radius:14px;padding:12px 14px;}}.error{{color:var(--danger);font-weight:850;}}
+</style></head><body><main><div class="page-tools"><a class="nav-button" href="/">Search</a><div class="theme-control"><label for="themeSelect">Theme</label><select id="themeSelect" aria-label="Theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div><section>
 <h1>Merchant setup</h1>
 <p class="note">Add or update merchant gateway credentials. The browser wizard writes local config with a <code>local_secret_ref</code>; it does not write the raw API key to config.</p>
 {existing}
 {error_html}
-<form method="post" action="/setup" data-testid="merchant-setup-form">
-  <label>Merchant alias <input name="alias" value="{alias}" autocomplete="off" required></label>
+<form method="post" action="/setup" data-testid="merchant-setup-form">{original_alias_input}
+  <label>Merchant alias <input name="alias" value="{alias}" autocomplete="off" required{alias_readonly}></label>
   <label>Merchant display name <input name="display_name" value="{display_name}" autocomplete="organization" required></label>
   <label>Gateway <select name="gateway"><option value="{gateway}">NMI</option></select></label>
   <label>Gateway base URL <input name="base_url" value="{base_url}" autocomplete="off" required></label>
   <label>API/security key <input name="api_key" type="password" autocomplete="off"{api_required}><span>{_e(api_help)}</span></label>
   <div><button type="submit">Save merchant setup</button> <a class="button" href="/">Back to search</a></div>
 </form>
-</section></main></body></html>"""
+{remove_form}
+</section></main><script>
+(function () {{
+  function applyTheme(mode) {{ var darkQuery = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)'); var resolved = mode === 'system' ? (darkQuery && darkQuery.matches ? 'dark' : 'light') : mode; document.documentElement.setAttribute('data-theme-mode', mode); document.documentElement.setAttribute('data-theme', resolved); var select=document.getElementById('themeSelect'); if(select) select.value=mode; }}
+  var themeSelect=document.getElementById('themeSelect'); applyTheme(document.documentElement.getAttribute('data-theme-mode') || 'system'); if(themeSelect) {{ themeSelect.addEventListener('change', function() {{ try {{ localStorage.setItem('transactionSearchTheme', themeSelect.value); }} catch(error) {{}} applyTheme(themeSelect.value); }}); }}
+}}());
+</script></body></html>"""
 
 
 def render_update_confirmation(*, form: dict[str, Any], merchant_name: str, changes: list[tuple[str, str, str]]) -> str:
@@ -237,8 +265,49 @@ def render_update_confirmation(*, form: dict[str, Any], merchant_name: str, chan
 <form method="post" action="/setup">{hidden}<input type="hidden" name="confirm_update" value="yes"><button type="submit">Confirm update</button> <a class="button secondary" href="/setup?merchant={_e(str(form.get('alias') or ''))}">Cancel</a></form>
 </section></main></body></html>"""
 
+def render_delete_confirmation(*, alias: str, merchant_name: str) -> str:
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Confirm merchant removal</title>
+<style>body{{font-family:Inter,system-ui,sans-serif;margin:0;background:#f8fafc;color:#142033}}main{{width:min(760px,calc(100% - 32px));margin:36px auto}}section{{background:white;border:1px solid #dbe5f0;border-radius:18px;padding:22px}}.button,button{{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:12px;padding:11px 14px;font-weight:850;background:#2458d3;color:white;text-decoration:none;cursor:pointer}}.danger{{background:#b91c1c}}</style></head><body><main><section>
+<h1>Confirm merchant removal</h1><p>You are about to remove <strong>{_e(merchant_name)}</strong> ({_e(alias)}) from this local kit. Searches for this merchant will stop working until it is added again.</p>
+<form method="post" action="/setup"><input type="hidden" name="action" value="delete"><input type="hidden" name="original_alias" value="{_e(alias)}"><input type="hidden" name="confirm_delete" value="yes"><button class="danger" type="submit">Remove merchant</button> <a class="button" href="/setup?merchant={_e(alias)}">Cancel</a></form>
+</section></main></body></html>"""
+
+
+def delete_browser_setup(form: dict[str, Any], *, config_path: str | Path | None, secret_store_path: str | Path | None = None) -> dict[str, Any]:
+    alias = _clean(form.get("original_alias") or form.get("alias"))
+    confirmed = _clean(form.get("confirm_delete")) == "yes"
+    if not alias:
+        return {"status": "error", "error": "Merchant alias is required"}
+    config_file = Path(config_path or "~/.payment-search/config.json").expanduser()
+    secret_file = Path(secret_store_path).expanduser() if secret_store_path else default_secret_store_path()
+    config = cli_module._read_local_config(config_file)
+    merchants = config.setdefault("merchants", {})
+    existing = merchants.get(alias, {}) if isinstance(merchants.get(alias), dict) else {}
+    if not existing:
+        return {"status": "error", "error": "Merchant was not found"}
+    merchant_name = str(existing.get("display_name") or alias)
+    if not confirmed:
+        return {"status": "confirm_delete", "merchant_alias": alias, "merchant_name": merchant_name}
+    merchants.pop(alias, None)
+    if config.get("default_merchant") == alias:
+        remaining = sorted(merchants)
+        if remaining:
+            config["default_merchant"] = remaining[0]
+        else:
+            config.pop("default_merchant", None)
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    config_file.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n")
+    try:
+        LocalSecretStore(secret_file).remove_secret("merchant", alias, "security_key")
+    except Exception:
+        pass
+    return {"status": "completed", "merchant_alias": alias}
+
+
 def save_browser_setup(form: dict[str, Any], *, config_path: str | Path | None, secret_store_path: str | Path | None = None) -> dict[str, Any]:
-    alias = _clean(form.get("alias"))
+    posted_alias = _clean(form.get("alias"))
+    original_alias = _clean(form.get("original_alias"))
+    alias = original_alias or posted_alias
     display_name = _clean(form.get("display_name")) or alias
     gateway = _clean(form.get("gateway")) or "nmi"
     base_url = _clean(form.get("base_url")) or "https://mbcard.transactiongateway.com"
@@ -806,6 +875,18 @@ def create_human_search_handler(
                 except json.JSONDecodeError:
                     html_body = render_setup_wizard(error="Invalid setup request", config_path=config_path)
                     self._send_bytes(400, html_body.encode("utf-8"), "text/html; charset=utf-8")
+                    return
+                if _clean(payload.get("action")) == "delete":
+                    result = delete_browser_setup(payload, config_path=config_path, secret_store_path=secret_store_path)
+                    if result.get("status") == "confirm_delete":
+                        html_body = render_delete_confirmation(alias=str(result.get("merchant_alias") or payload.get("original_alias") or ""), merchant_name=str(result.get("merchant_name") or payload.get("original_alias") or "merchant"))
+                        self._send_bytes(200, html_body.encode("utf-8"), "text/html; charset=utf-8")
+                        return
+                    if result.get("status") != "completed":
+                        html_body = render_setup_wizard(error=str(result.get("error") or "Delete failed"), config_path=config_path)
+                        self._send_bytes(400, html_body.encode("utf-8"), "text/html; charset=utf-8")
+                        return
+                    self._send_redirect("/setup")
                     return
                 result = save_browser_setup(payload, config_path=config_path, secret_store_path=secret_store_path)
                 if result.get("status") == "confirm_update":

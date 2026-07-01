@@ -262,15 +262,100 @@ class TenantScopedDashboardHttpTests(unittest.TestCase):
         self.assertIn('name="alias" value="suddergoose-llc"', edit_setup)
         self.assertIn('name="display_name" value="Suddergoose LLC"', edit_setup)
 
-    def test_primary_nav_uses_button_styling_on_search_and_merchant_pages(self):
+    def test_primary_nav_uses_button_styling_on_search_and_setup_page_does_not_link_to_itself(self):
         with _dashboard_server(tenant_registry=False) as server:
             search_html = _get_text(server.base_url + "/")
             merchant_html = _get_text(server.base_url + "/setup")
 
-        for html in (search_html, merchant_html):
-            self.assertIn('class="nav-button" href="/"', html)
-            self.assertIn('class="nav-button" href="/setup"', html)
-            self.assertIn(".nav-button", html)
+        self.assertIn('class="nav-button" href="/"', search_html)
+        self.assertIn('class="nav-button" href="/setup"', search_html)
+        self.assertIn(".nav-button", search_html)
+        self.assertIn('class="nav-button" href="/"', merchant_html)
+        self.assertNotIn('class="nav-button" href="/setup"', merchant_html)
+        self.assertIn(".nav-button", merchant_html)
+
+
+    def test_setup_page_carries_theme_control_and_storage_key(self):
+        with _dashboard_server(tenant_registry=False) as server:
+            html = _get_text(server.base_url + "/setup")
+
+        self.assertIn("transactionSearchTheme", html)
+        self.assertIn('id="themeSelect"', html)
+        self.assertIn('data-theme', html)
+
+    def test_existing_merchant_update_uses_original_alias_and_does_not_create_new_entry(self):
+        with _dashboard_server(tenant_registry=False) as server:
+            _post_form(
+                server.base_url + "/setup",
+                {
+                    "alias": "suddergoose-llc",
+                    "display_name": "Suddergoose LLC",
+                    "gateway": "nmi",
+                    "base_url": "https://mbcard.transactiongateway.com",
+                    "api_key": "original-secret-key",
+                },
+            )
+            edit_html = _get_text(server.base_url + "/setup?merchant=suddergoose-llc")
+            confirmation = _post_form(
+                server.base_url + "/setup",
+                {
+                    "original_alias": "suddergoose-llc",
+                    "alias": "suddergoose-llc-typo",
+                    "display_name": "Suddergoose LLC Updated",
+                    "gateway": "nmi",
+                    "base_url": "https://example-gateway.local",
+                    "api_key": "",
+                },
+            )
+            response = _post_form(
+                server.base_url + "/setup",
+                {
+                    "original_alias": "suddergoose-llc",
+                    "alias": "suddergoose-llc-typo",
+                    "display_name": "Suddergoose LLC Updated",
+                    "gateway": "nmi",
+                    "base_url": "https://example-gateway.local",
+                    "api_key": "",
+                    "confirm_update": "yes",
+                },
+            )
+            config = json.loads(server.config_path.read_text())
+
+        self.assertIn('name="original_alias" value="suddergoose-llc"', edit_html)
+        self.assertIn('name="alias" value="suddergoose-llc"', edit_html)
+        self.assertIn("readonly", edit_html)
+        self.assertEqual(confirmation["status"], 200)
+        self.assertEqual(response["status"], 303)
+        self.assertEqual(sorted(config["merchants"]), ["suddergoose-llc"])
+        self.assertEqual(config["merchants"]["suddergoose-llc"]["display_name"], "Suddergoose LLC Updated")
+
+    def test_remove_merchant_requires_confirmation_and_removes_config_and_secret(self):
+        with _dashboard_server(tenant_registry=False) as server:
+            _post_form(
+                server.base_url + "/setup",
+                {
+                    "alias": "suddergoose-llc",
+                    "display_name": "Suddergoose LLC",
+                    "gateway": "nmi",
+                    "base_url": "https://mbcard.transactiongateway.com",
+                    "api_key": "secret-to-remove",
+                },
+            )
+            edit_html = _get_text(server.base_url + "/setup?merchant=suddergoose-llc")
+            confirmation = _post_form(server.base_url + "/setup", {"action": "delete", "original_alias": "suddergoose-llc"})
+            config_before = json.loads(server.config_path.read_text())
+            response = _post_form(server.base_url + "/setup", {"action": "delete", "original_alias": "suddergoose-llc", "confirm_delete": "yes"})
+            config = json.loads(server.config_path.read_text())
+            secret_text = server.secret_store_path.read_text()
+
+        self.assertIn("Remove merchant", edit_html)
+        self.assertEqual(confirmation["status"], 200)
+        self.assertIn("Confirm merchant removal", str(confirmation["body"]))
+        self.assertIn("Suddergoose LLC", str(confirmation["body"]))
+        self.assertIn("suddergoose-llc", config_before["merchants"])
+        self.assertEqual(response["status"], 303)
+        self.assertNotIn("suddergoose-llc", config.get("merchants", {}))
+        self.assertNotIn("secret-to-remove", secret_text)
 
     def test_search_page_has_merchants_navigation_and_local_retention_copy(self):
         with _dashboard_server(tenant_registry=False) as server:
