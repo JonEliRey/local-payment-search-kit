@@ -436,7 +436,7 @@ def run_human_investigate_request(
     except Exception:
         return {"status": "error", "error": "credential_resolution_failed"}
     try:
-        args = _search_args(validation.normalized, timeout=timeout)
+        args = _investigate_args(validation.normalized, timeout=timeout)
         args.output_dir = str(output_dir)
         args.case_id = _safe_case_id(form)
         args.title = "Transaction Search Detail"
@@ -1096,6 +1096,24 @@ def _search_args(form: dict[str, Any], *, timeout: int) -> Namespace:
         max_pages=int(_clean(form.get("max_pages")) or 5),
         timeout=timeout,
     )
+
+
+def _investigate_args(form: dict[str, Any], *, timeout: int) -> Namespace:
+    """Build detail args with a single gateway lookup key.
+
+    Browser row actions include supporting search fields from the form plus the
+    selected row identifiers. The gateway detail workflow must not receive both
+    transaction_id and order_id/amount because the lower query layer accepts a
+    single lookup key. Prefer the strongest selected-row identifier.
+    """
+    narrowed = dict(form)
+    if _clean(narrowed.get("transaction_id")):
+        for key in ("order_id", "amount", "start_date", "end_date", "action_type", "condition", "transaction_type"):
+            narrowed.pop(key, None)
+    elif _clean(narrowed.get("order_id")):
+        for key in ("amount", "action_type", "condition", "transaction_type"):
+            narrowed.pop(key, None)
+    return _search_args(narrowed, timeout=timeout)
 
 
 def _safe_case_id(form: dict[str, Any]) -> str:

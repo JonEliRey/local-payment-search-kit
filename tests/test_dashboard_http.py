@@ -185,6 +185,56 @@ class TenantScopedDashboardHttpTests(unittest.TestCase):
         self.assertIn("unknown", response["json"].get("reason", ""))
         run_search.assert_not_called()
 
+
+    def test_local_mode_investigate_prefers_selected_transaction_id_over_supporting_fields(self):
+        captured = {}
+
+        def fake_investigate(args, merchant, security_key):
+            captured["args"] = args
+            return {
+                "status": "ambiguous",
+                "merchant": {"alias": "suddergoose-llc", "display_name": "Suddergoose LLC"},
+                "candidate_summary": {"candidate_count": 2, "top_score": 10, "ambiguous": True},
+                "candidates": [
+                    {"transaction_id": "txn_123", "order_id": "ord_123", "amount": "10.00", "score": 10},
+                    {"transaction_id": "txn_456", "order_id": "ord_456", "amount": "10.00", "score": 9},
+                ],
+                "artifacts": {},
+            }
+
+        with _dashboard_server(tenant_registry=False) as server:
+            _post_form(
+                server.base_url + "/setup",
+                {
+                    "alias": "suddergoose-llc",
+                    "display_name": "Suddergoose LLC",
+                    "gateway": "nmi",
+                    "base_url": "https://mbcard.transactiongateway.com",
+                    "api_key": "synthetic-local-search-key",
+                },
+            )
+            with patch("payment_evidence.cli._run_investigate", side_effect=fake_investigate) as run_investigate:
+                response = _post_json(
+                    server.base_url + "/api/investigate",
+                    {
+                        "merchant_id": "suddergoose-llc",
+                        "start_date": "2026-06-01",
+                        "end_date": "2026-06-02",
+                        "amount": "10.00",
+                        "order_id": "ord_123",
+                        "transaction_id": "txn_123",
+                    },
+                )
+
+        self.assertEqual(response["status"], 200)
+        run_investigate.assert_called_once()
+        args = captured["args"]
+        self.assertEqual(args.transaction_id, "txn_123")
+        self.assertIsNone(args.order_id)
+        self.assertIsNone(args.amount)
+        self.assertIsNone(args.start_date)
+        self.assertIsNone(args.end_date)
+
     def test_setup_wizard_selects_existing_merchant_and_preserves_key_after_confirmation(self):
         with _dashboard_server(tenant_registry=False) as server:
             _post_form(
