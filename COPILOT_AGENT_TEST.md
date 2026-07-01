@@ -20,8 +20,8 @@ Run these steps and report exact commands and results:
    - `payment-search add-merchant --help`
    - `payment-search start --help`
 5. Create a temporary `PAYMENT_SEARCH_HOME`.
-6. Start the browser with `payment-search start --port 0`.
-7. Read the printed local URL.
+6. Start the browser with `payment-search start`.
+7. Read the printed local URL. The normal default is `http://127.0.0.1:8787`. If this port is occupied in the test environment, stop the old process or rerun with an explicit alternate port such as `--port 8788`.
 8. Fetch the root page and verify it contains `Setup required` and a link to `/setup`.
 9. Fetch `/setup` and verify the browser setup wizard contains:
    - merchant alias field;
@@ -73,3 +73,4 @@ Verify the CLI fallback also writes `local_secret_ref` without writing the raw k
 - Setup-required guidance renders when no merchant config exists.
 - Configured merchant appears after wizard submit.
 - No live gateway call is attempted.
+- Text/JSON artifacts and local config helpers use explicit UTF-8 encoding so Windows default code pages do not break transaction detail generation.

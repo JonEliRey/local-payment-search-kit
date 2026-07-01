@@ -52,6 +52,20 @@ Humans use:
 payment-search start
 ```
 
-Then they open the local URL. If setup is incomplete, they click **Open setup wizard** or visit `/setup`, enter the merchant credential once, and continue to Transaction Search / Transaction Detail.
+Then they open `http://127.0.0.1:8787` unless the command prints a different explicit URL. If setup is incomplete, they click **Open setup wizard** or visit `/setup`, enter the merchant credential once, and continue to Transaction Search / Transaction Detail.
+
+## Merchant management support
+
+- `/setup` defaults to blank new-merchant values.
+- Selecting an existing merchant pre-fills that merchant for editing.
+- Existing merchant updates require confirmation before writing config or secrets.
+- Existing merchant removals require confirmation and remove the merchant config plus its local secret ref.
+- Do not ask humans to edit `~/.payment-search/config.json` or `~/.payment-search/secrets.json` by hand.
+
+## Troubleshooting notes for agents
+
+- If Windows shows `Gateway request failed` but WSL works, first verify the Windows checkout is on the latest `feat/browser-setup-wizard` branch, rerun Install / Update, and restart the Windows app process. Older builds failed on Unicode artifact writes because Windows may default to `cp1252`.
+- If search succeeds but detail fails, inspect the local app version before assuming a gateway issue. Detail generation includes local artifact rendering and UTF-8 file writes.
+- If `8787` is already in use, identify the old local process and stop it, or restart with an explicit alternate port. Do not reintroduce random port defaults for the human flow.
 
 The CLI remains the agent-facing control surface; the browser remains the human-facing surface.
