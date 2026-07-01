@@ -88,6 +88,7 @@ def render_human_search_dashboard(
     .theme-control {{ display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:12px; background:var(--tool-bg); border:1px solid var(--tool-line); }}
     .theme-control label {{ color:white; font-size:.78rem; font-weight:850; text-transform:uppercase; letter-spacing:.08em; }}
     .theme-control select {{ min-height:34px; border-radius:9px; border:1px solid rgba(255,255,255,.25); background:rgba(2,6,23,.34); color:white; font:inherit; font-weight:750; padding:4px 8px; }}
+    .app-nav {{ display:flex; gap:10px; flex-wrap:wrap; }} .nav-button {{ display:inline-flex; align-items:center; justify-content:center; border:0; border-radius:12px; padding:9px 12px; font-weight:850; background:var(--brand); color:white; text-decoration:none; }}
     main {{ width:min(1120px, calc(100% - 32px)); margin:28px auto 54px; }} .hero {{ padding:26px; border-radius:24px; background:linear-gradient(135deg,#0f172a,#1d4ed8 62%,#0f766e); color:white; box-shadow:0 18px 40px rgba(15,23,42,.12); }}
     .hero p {{ max-width:820px; opacity:.88; }} section {{ margin-top:16px; padding:20px; background:var(--panel); border:1px solid var(--line); border-radius:18px; box-shadow:0 8px 22px rgba(15,23,42,.06); }}
     form {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:14px; }} label {{ display:grid; gap:6px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; font-size:.74rem; font-weight:800; }}
@@ -98,7 +99,7 @@ def render_human_search_dashboard(
 </head>
 <body>
 <div class="page-tools">
-  <nav class="app-nav" aria-label="Primary"><a href="/">Search</a><a href="/setup">Merchants</a></nav>
+  <nav class="app-nav" aria-label="Primary"><a class="nav-button" href="/">Search</a><a class="nav-button" href="/setup">Merchants</a></nav>
   <div class="theme-control" role="group" aria-label="Theme">
     <label for="themeSelect">Theme</label>
     <select id="themeSelect" aria-label="Theme">
@@ -171,31 +172,33 @@ def render_setup_wizard(
 ) -> str:
     config = _read_setup_config(config_path)
     merchants = config.get("merchants", {}) if isinstance(config.get("merchants"), dict) else {}
-    selected = selected_alias or _clean((values or {}).get("alias")) or str(config.get("default_merchant") or "")
+    selected = _clean(selected_alias) or _clean((values or {}).get("selected_alias")) or ""
     selected_entry = merchants.get(selected, {}) if selected else {}
     merged_values = {
-        "alias": selected or "merchant-local",
-        "display_name": selected_entry.get("display_name") or selected or "Merchant Local",
+        "alias": selected or "",
+        "display_name": selected_entry.get("display_name") or "",
         "gateway": selected_entry.get("gateway") or "nmi",
         "base_url": selected_entry.get("base_url") or "https://mbcard.transactiongateway.com",
     }
     if values:
         for key in ("alias", "display_name", "gateway", "base_url"):
-            if _clean(values.get(key)):
-                merged_values[key] = _clean(values.get(key))
+            value = _clean(values.get(key))
+            if value is not None:
+                merged_values[key] = value
     error_html = f'<p class="error">{_e(error)}</p>' if error else ""
     options = ''.join(
         f'<option value="{_e(alias)}"{" selected" if alias == selected else ""}>{_e(entry.get("display_name") or alias)}</option>'
         for alias, entry in sorted(merchants.items())
         if isinstance(entry, dict)
     )
+    add_selected = " selected" if not selected else ""
     existing = (
-        f'<label>Existing merchants <select name="existing_merchant" onchange="if(this.value) window.location=\'/setup?merchant=\'+encodeURIComponent(this.value)"><option value="">Add new merchant</option>{options}</select></label>'
+        f'<label>Existing merchants <select name="existing_merchant" onchange="window.location=\'/setup\'+(this.value?\'?merchant=\'+encodeURIComponent(this.value):\'\')"><option value=""{add_selected}>Add new merchant</option>{options}</select></label>'
         if merchants
         else '<p class="note">No merchants configured yet. Add the first merchant below.</p>'
     )
-    alias = _e(str(merged_values.get("alias") or "merchant-local"))
-    display_name = _e(str(merged_values.get("display_name") or "Merchant Local"))
+    alias = _e(str(merged_values.get("alias") or ""))
+    display_name = _e(str(merged_values.get("display_name") or ""))
     gateway = _e(str(merged_values.get("gateway") or "nmi"))
     base_url = _e(str(merged_values.get("base_url") or "https://mbcard.transactiongateway.com"))
     api_required = "" if selected_entry else " required"
@@ -207,9 +210,9 @@ def render_setup_wizard(
 body{{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;background:#f8fafc;color:#142033;}}
 main{{width:min(780px,calc(100% - 32px));margin:36px auto;}}
 section{{background:white;border:1px solid #dbe5f0;border-radius:18px;padding:22px;box-shadow:0 8px 22px rgba(15,23,42,.06);}}
-nav{{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}}nav a,.button{{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:12px;padding:11px 14px;font-weight:850;background:#2458d3;color:white;text-decoration:none;cursor:pointer;}}
+nav{{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}}.nav-button,.button{{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:12px;padding:11px 14px;font-weight:850;background:#2458d3;color:white;text-decoration:none;cursor:pointer;}}
 form{{display:grid;gap:14px;}}label{{display:grid;gap:6px;font-weight:800;color:#475569;}}input,select{{width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;font:inherit;}}button{{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:12px;padding:11px 14px;font-weight:850;background:#2458d3;color:white;text-decoration:none;cursor:pointer;}}.note{{background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:12px 14px;}}.error{{color:#b91c1c;font-weight:850;}}
-</style></head><body><main><nav aria-label="Primary"><a href="/">Search</a><a href="/setup">Merchants</a></nav><section>
+</style></head><body><main><nav aria-label="Primary"><a class="nav-button" href="/">Search</a><a class="nav-button" href="/setup">Merchants</a></nav><section>
 <h1>Merchant setup</h1>
 <p class="note">Add or update merchant gateway credentials. The browser wizard writes local config with a <code>local_secret_ref</code>; it does not write the raw API key to config.</p>
 {existing}
@@ -225,12 +228,22 @@ form{{display:grid;gap:14px;}}label{{display:grid;gap:6px;font-weight:800;color:
 </section></main></body></html>"""
 
 
+def render_update_confirmation(*, form: dict[str, Any], merchant_name: str, changes: list[tuple[str, str, str]]) -> str:
+    rows = ''.join(f'<li><strong>{_e(label)}</strong> for {_e(merchant_name)}: {_e(old)} → {_e(new)}</li>' for label, old, new in changes)
+    hidden = ''.join(f'<input type="hidden" name="{_e(key)}" value="{_e(value)}">' for key, value in form.items() if key != "confirm_update")
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Confirm merchant update</title>
+<style>body{{font-family:Inter,system-ui,sans-serif;margin:0;background:#f8fafc;color:#142033}}main{{width:min(760px,calc(100% - 32px));margin:36px auto}}section{{background:white;border:1px solid #dbe5f0;border-radius:18px;padding:22px}}.button,button{{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:12px;padding:11px 14px;font-weight:850;background:#2458d3;color:white;text-decoration:none;cursor:pointer}}.secondary{{background:#64748b}}</style></head><body><main><section>
+<h1>Confirm merchant update</h1><p>You are about to update the following fields for <strong>{_e(merchant_name)}</strong>:</p><ul>{rows}</ul>
+<form method="post" action="/setup">{hidden}<input type="hidden" name="confirm_update" value="yes"><button type="submit">Confirm update</button> <a class="button secondary" href="/setup?merchant={_e(str(form.get('alias') or ''))}">Cancel</a></form>
+</section></main></body></html>"""
+
 def save_browser_setup(form: dict[str, Any], *, config_path: str | Path | None, secret_store_path: str | Path | None = None) -> dict[str, Any]:
     alias = _clean(form.get("alias"))
     display_name = _clean(form.get("display_name")) or alias
     gateway = _clean(form.get("gateway")) or "nmi"
     base_url = _clean(form.get("base_url")) or "https://mbcard.transactiongateway.com"
     api_key = _clean(form.get("api_key"))
+    confirmed = _clean(form.get("confirm_update")) == "yes"
     if not alias:
         return {"status": "error", "error": "Merchant alias is required"}
     if not display_name:
@@ -243,6 +256,10 @@ def save_browser_setup(form: dict[str, Any], *, config_path: str | Path | None, 
     config = cli_module._read_local_config(config_file)
     merchants = config.setdefault("merchants", {})
     existing = merchants.get(alias, {}) if isinstance(merchants.get(alias), dict) else {}
+    if existing:
+        changes = _merchant_update_changes(existing, display_name=display_name or "", gateway=gateway, base_url=base_url, api_key_present=bool(api_key))
+        if changes and not confirmed:
+            return {"status": "confirm_update", "merchant_alias": alias, "merchant_name": existing.get("display_name") or alias, "changes": changes}
     secret_ref = str(existing.get("local_secret_ref") or f"merchant/{alias}/security_key")
     if api_key:
         LocalSecretStore(secret_file).set_secret("merchant", alias, "security_key", api_key)
@@ -258,6 +275,18 @@ def save_browser_setup(form: dict[str, Any], *, config_path: str | Path | None, 
     config_file.parent.mkdir(parents=True, exist_ok=True)
     config_file.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n")
     return {"status": "completed", "merchant_alias": alias}
+
+
+def _merchant_update_changes(existing: dict[str, Any], *, display_name: str, gateway: str, base_url: str, api_key_present: bool) -> list[tuple[str, str, str]]:
+    checks = [
+        ("display name", str(existing.get("display_name") or ""), display_name),
+        ("Gateway", str(existing.get("gateway") or "nmi"), gateway),
+        ("Gateway base URL", str(existing.get("base_url") or ""), base_url),
+    ]
+    changes = [(label, old, new) for label, old, new in checks if old != new]
+    if api_key_present:
+        changes.append(("API/security key", "existing local secret", "new local secret"))
+    return changes
 
 
 def _read_setup_config(config_path: str | Path | None) -> dict[str, Any]:
@@ -779,6 +808,10 @@ def create_human_search_handler(
                     self._send_bytes(400, html_body.encode("utf-8"), "text/html; charset=utf-8")
                     return
                 result = save_browser_setup(payload, config_path=config_path, secret_store_path=secret_store_path)
+                if result.get("status") == "confirm_update":
+                    html_body = render_update_confirmation(form=payload, merchant_name=str(result.get("merchant_name") or payload.get("alias") or "merchant"), changes=result.get("changes") or [])
+                    self._send_bytes(200, html_body.encode("utf-8"), "text/html; charset=utf-8")
+                    return
                 if result.get("status") != "completed":
                     html_body = render_setup_wizard(error=str(result.get("error") or "Setup failed"), values=payload, config_path=config_path)
                     self._send_bytes(400, html_body.encode("utf-8"), "text/html; charset=utf-8")

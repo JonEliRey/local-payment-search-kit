@@ -185,7 +185,7 @@ class TenantScopedDashboardHttpTests(unittest.TestCase):
         self.assertIn("unknown", response["json"].get("reason", ""))
         run_search.assert_not_called()
 
-    def test_setup_wizard_selects_existing_merchant_and_preserves_key_when_blank(self):
+    def test_setup_wizard_selects_existing_merchant_and_preserves_key_after_confirmation(self):
         with _dashboard_server(tenant_registry=False) as server:
             _post_form(
                 server.base_url + "/setup",
@@ -198,7 +198,7 @@ class TenantScopedDashboardHttpTests(unittest.TestCase):
                 },
             )
             setup_html = _get_text(server.base_url + "/setup?merchant=suddergoose-llc")
-            response = _post_form(
+            confirmation = _post_form(
                 server.base_url + "/setup",
                 {
                     "alias": "suddergoose-llc",
@@ -208,6 +208,18 @@ class TenantScopedDashboardHttpTests(unittest.TestCase):
                     "api_key": "",
                 },
             )
+            config_before = json.loads(server.config_path.read_text())
+            response = _post_form(
+                server.base_url + "/setup",
+                {
+                    "alias": "suddergoose-llc",
+                    "display_name": "Suddergoose LLC Updated",
+                    "gateway": "nmi",
+                    "base_url": "https://example-gateway.local",
+                    "api_key": "",
+                    "confirm_update": "yes",
+                },
+            )
             config = json.loads(server.config_path.read_text())
             secret = server.secret_store_path.read_text()
 
@@ -215,11 +227,50 @@ class TenantScopedDashboardHttpTests(unittest.TestCase):
         self.assertIn('value="suddergoose-llc" selected', setup_html)
         self.assertIn('value="Suddergoose LLC"', setup_html)
         self.assertNotIn("original-secret-key", setup_html)
+        self.assertEqual(confirmation["status"], 200)
+        self.assertIn("Confirm merchant update", str(confirmation["body"]))
+        self.assertIn("display name", str(confirmation["body"]).lower())
+        self.assertIn("Gateway base URL", str(confirmation["body"]))
+        self.assertEqual(config_before["merchants"]["suddergoose-llc"]["display_name"], "Suddergoose LLC")
         self.assertEqual(response["status"], 303)
         merchant = config["merchants"]["suddergoose-llc"]
         self.assertEqual(merchant["display_name"], "Suddergoose LLC Updated")
         self.assertEqual(merchant["base_url"], "https://example-gateway.local")
         self.assertIn("original-secret-key", secret)
+
+
+    def test_setup_defaults_blank_and_add_new_selection_clears_form(self):
+        with _dashboard_server(tenant_registry=False) as server:
+            _post_form(
+                server.base_url + "/setup",
+                {
+                    "alias": "suddergoose-llc",
+                    "display_name": "Suddergoose LLC",
+                    "gateway": "nmi",
+                    "base_url": "https://mbcard.transactiongateway.com",
+                    "api_key": "synthetic-key",
+                },
+            )
+            blank_setup = _get_text(server.base_url + "/setup")
+            edit_setup = _get_text(server.base_url + "/setup?merchant=suddergoose-llc")
+
+        self.assertIn('value="" selected>Add new merchant</option>', blank_setup)
+        self.assertIn('name="alias" value=""', blank_setup)
+        self.assertIn('name="display_name" value=""', blank_setup)
+        self.assertNotIn('name="alias" value="suddergoose-llc"', blank_setup)
+        self.assertIn("onchange=\"window.location='/setup'+(this.value?'?merchant='+encodeURIComponent(this.value):'')\"", blank_setup)
+        self.assertIn('name="alias" value="suddergoose-llc"', edit_setup)
+        self.assertIn('name="display_name" value="Suddergoose LLC"', edit_setup)
+
+    def test_primary_nav_uses_button_styling_on_search_and_merchant_pages(self):
+        with _dashboard_server(tenant_registry=False) as server:
+            search_html = _get_text(server.base_url + "/")
+            merchant_html = _get_text(server.base_url + "/setup")
+
+        for html in (search_html, merchant_html):
+            self.assertIn('class="nav-button" href="/"', html)
+            self.assertIn('class="nav-button" href="/setup"', html)
+            self.assertIn(".nav-button", html)
 
     def test_search_page_has_merchants_navigation_and_local_retention_copy(self):
         with _dashboard_server(tenant_registry=False) as server:
