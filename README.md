@@ -7,8 +7,8 @@ The human surface is the browser. The agent surface is the CLI/API. Agents shoul
 ## What this is
 
 - A local Payment Search browser app.
-- A deterministic `payment-search` CLI for setup support and AI-agent operation.
-- A guided merchant credential setup path.
+- A browser setup wizard for human merchant credential setup.
+- A deterministic `payment-search` CLI for AI-agent operation and setup fallback.
 - Local-only config, secrets, and artifacts under `~/.payment-search/` by default.
 - A clean, source-available distribution for authorized merchant-side use.
 
@@ -61,7 +61,15 @@ payment-search start --help
 
 ## Add a merchant
 
-Interactive:
+Human-first path:
+
+```bash
+payment-search start
+```
+
+Open the local URL. If no merchant is configured, choose **Open setup wizard** or visit `/setup`. The browser setup wizard saves the merchant config locally and stores the raw API key only in the local secret store.
+
+Agent/CLI fallback:
 
 ```bash
 payment-search add-merchant
@@ -88,7 +96,7 @@ payment-search start
 
 Then open the local URL shown in the terminal and use Transaction Search.
 
-If setup is incomplete, the browser starts anyway and shows setup-required guidance.
+If setup is incomplete, the browser starts anyway and shows setup-required guidance with a link to the browser setup wizard.
 
 ## Safety rules
 

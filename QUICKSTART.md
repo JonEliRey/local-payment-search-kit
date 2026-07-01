@@ -16,36 +16,7 @@ Windows PowerShell:
 .\scripts\setup-local-kit.ps1
 ```
 
-## 2. Add merchant credentials
-
-Run the guided setup:
-
-```bash
-payment-search add-merchant
-```
-
-The command asks for:
-
-- merchant alias;
-- merchant display name;
-- gateway, normally `nmi`;
-- gateway base URL;
-- merchant API/security key.
-
-The API key is stored locally under `~/.payment-search/secrets.json`. The generated runtime config at `~/.payment-search/config.json` stores only a `local_secret_ref`, not the raw key.
-
-An AI agent may use the deterministic form:
-
-```bash
-printf '%s' "$MERCHANT_API_KEY" | payment-search add-merchant \
-  --alias merchant-local \
-  --display-name "Merchant Local" \
-  --gateway nmi \
-  --base-url https://mbcard.transactiongateway.com \
-  --api-key-stdin
-```
-
-## 3. Start the browser app
+## 2. Start the browser app
 
 ```bash
 payment-search start
@@ -65,11 +36,40 @@ Windows PowerShell:
 .\scripts\start-dashboard.ps1
 ```
 
-If no merchant has been configured yet, the browser shows:
+## 3. Add merchant credentials
+
+Human-first browser path:
+
+1. Open the local URL printed by `payment-search start`.
+2. If no merchant is configured, click **Open setup wizard** or go to `/setup`.
+3. Enter merchant alias, display name, gateway URL, and API/security key.
+4. Submit the form and return to Transaction Search.
+
+The API key is stored locally under `~/.payment-search/secrets.json`. The generated runtime config at `~/.payment-search/config.json` stores only a `local_secret_ref`, not the raw key.
+
+CLI fallback:
+
+```bash
+payment-search add-merchant
+```
+
+An AI agent may use the deterministic form:
+
+```bash
+printf '%s' "$MERCHANT_API_KEY" | payment-search add-merchant \
+  --alias merchant-local \
+  --display-name "Merchant Local" \
+  --gateway nmi \
+  --base-url https://mbcard.transactiongateway.com \
+  --api-key-stdin
+```
+
+If no merchant has been configured yet, the browser shows a link to `/setup` plus CLI fallback guidance:
 
 ```text
 Setup required
 Add your merchant API credentials before running Transaction Search.
+Open setup wizard
 Run:
 payment-search add-merchant
 ```

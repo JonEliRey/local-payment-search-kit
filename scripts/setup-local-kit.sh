@@ -14,7 +14,7 @@ fi
 # shellcheck disable=SC1091
 . "$VENV_DIR/bin/activate"
 python -m pip install --upgrade pip
-python -m pip install -e .
+python -m pip install -e . pytest
 
 cat <<'MSG'
 Payment Search local kit is installed.

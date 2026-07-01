@@ -192,6 +192,19 @@ class PaymentSearchDocsTests(unittest.TestCase):
             self.assertNotIn("payment-" + "evidence add-merchant", text)
             self.assertNotIn("payment-" + "evidence start", text)
 
+    def test_public_docs_make_browser_setup_wizard_the_primary_human_path(self):
+        readme = (ROOT / "README.md").read_text()
+        quickstart = (ROOT / "QUICKSTART.md").read_text()
+        agent_runbook = (ROOT / "AGENT_RUNBOOK.md").read_text()
+        copilot_test = (ROOT / "COPILOT_AGENT_TEST.md").read_text()
+
+        self.assertIn("browser setup wizard", readme.lower())
+        self.assertIn("/setup", quickstart)
+        self.assertIn("Humans use the browser setup wizard", agent_runbook)
+        self.assertIn("Agents may use `payment-search add-merchant`", agent_runbook)
+        self.assertIn("/setup", copilot_test)
+        self.assertIn("synthetic-browser-test-key", copilot_test)
+
     def test_setup_and_start_wrappers_are_payment_search_only(self):
         script_paths = [
             ROOT / "scripts/setup-local-kit.sh",
@@ -204,6 +217,13 @@ class PaymentSearchDocsTests(unittest.TestCase):
             text = path.read_text()
             self.assertIn("payment-search", text)
             self.assertNotIn("payment-evidence", text)
+
+    def test_setup_wrappers_install_pytest_for_uat_verification(self):
+        unix_setup = (ROOT / "scripts/setup-local-kit.sh").read_text()
+        windows_setup = (ROOT / "scripts/setup-local-kit.ps1").read_text()
+
+        self.assertIn("python -m pip install -e . pytest", unix_setup)
+        self.assertIn("-m pip install -e . pytest", windows_setup)
 
 
 if __name__ == "__main__":

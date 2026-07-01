@@ -16,6 +16,7 @@ from .artifacts import ArtifactStore
 from .cloudflare_access import validator_from_jwks_url
 from .config import load_configured_aliases, load_merchant_config, resolve_default_merchant_alias
 from .identity import CloudflareValidator, extract_identity
+from .secret_store import LocalSecretStore, default_secret_store_path
 from .secrets import resolve_security_key
 from .service_requests import validation_error_response, validate_investigate_request, validate_search_request
 from .tenant_registry import TenantRegistry
@@ -152,8 +153,72 @@ def _render_setup_required_panel() -> str:
     return (
         '<section data-testid="setup-required"><h2>Setup required</h2>'
         '<p class="note">Add your merchant API credentials before running Transaction Search.</p>'
+        '<p><a href="/setup">Open setup wizard</a> to add credentials in the browser.</p>'
         '<p>Run:</p><pre><code>payment-search add-merchant</code></pre></section>'
     )
+
+
+def render_setup_wizard(*, error: str | None = None, values: dict[str, Any] | None = None) -> str:
+    values = values or {}
+    error_html = f'<p class="error">{_e(error)}</p>' if error else ""
+    alias = _e(str(values.get("alias") or "merchant-local"))
+    display_name = _e(str(values.get("display_name") or "Merchant Local"))
+    gateway = _e(str(values.get("gateway") or "nmi"))
+    base_url = _e(str(values.get("base_url") or "https://mbcard.transactiongateway.com"))
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Merchant setup</title>
+<style>
+body{{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;background:#f8fafc;color:#142033;}}
+main{{width:min(780px,calc(100% - 32px));margin:36px auto;}}
+section{{background:white;border:1px solid #dbe5f0;border-radius:18px;padding:22px;box-shadow:0 8px 22px rgba(15,23,42,.06);}}
+form{{display:grid;gap:14px;}}label{{display:grid;gap:6px;font-weight:800;color:#475569;}}input,select{{width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;font:inherit;}}button,.button{{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:12px;padding:11px 14px;font-weight:850;background:#2458d3;color:white;text-decoration:none;cursor:pointer;}}.note{{background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:12px 14px;}}.error{{color:#b91c1c;font-weight:850;}}
+</style></head><body><main><section>
+<h1>Merchant setup</h1>
+<p class="note">Enter the merchant gateway credential once. The browser wizard writes local config with a <code>local_secret_ref</code>; it does not write the raw API key to config.</p>
+{error_html}
+<form method="post" action="/setup" data-testid="merchant-setup-form">
+  <label>Merchant alias <input name="alias" value="{alias}" autocomplete="off" required></label>
+  <label>Merchant display name <input name="display_name" value="{display_name}" autocomplete="organization" required></label>
+  <label>Gateway <select name="gateway"><option value="{gateway}">NMI</option></select></label>
+  <label>Gateway base URL <input name="base_url" value="{base_url}" autocomplete="off" required></label>
+  <label>API/security key <input name="api_key" type="password" autocomplete="off" required></label>
+  <div><button type="submit">Save merchant setup</button> <a class="button" href="/">Back to search</a></div>
+</form>
+</section></main></body></html>"""
+
+
+def save_browser_setup(form: dict[str, Any], *, config_path: str | Path | None, secret_store_path: str | Path | None = None) -> dict[str, Any]:
+    alias = _clean(form.get("alias"))
+    display_name = _clean(form.get("display_name")) or alias
+    gateway = _clean(form.get("gateway")) or "nmi"
+    base_url = _clean(form.get("base_url")) or "https://mbcard.transactiongateway.com"
+    api_key = _clean(form.get("api_key"))
+    if not alias:
+        return {"status": "error", "error": "Merchant alias is required"}
+    if not display_name:
+        return {"status": "error", "error": "Merchant display name is required"}
+    if not api_key:
+        return {"status": "error", "error": "API key is required"}
+    if gateway != "nmi":
+        return {"status": "error", "error": "Gateway must be nmi"}
+
+    config_file = Path(config_path or "~/.payment-search/config.json").expanduser()
+    secret_file = Path(secret_store_path).expanduser() if secret_store_path else default_secret_store_path()
+    secret_ref = f"merchant/{alias}/security_key"
+    LocalSecretStore(secret_file).set_secret("merchant", alias, "security_key", api_key)
+    config = cli_module._read_local_config(config_file)
+    merchants = config.setdefault("merchants", {})
+    merchants[alias] = {
+        "display_name": display_name,
+        "gateway": gateway,
+        "base_url": base_url,
+        "local_secret_ref": secret_ref,
+    }
+    config["default_merchant"] = alias
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    config_file.write_text(json.dumps(config, indent=2, sort_keys=True) + "\n")
+    return {"status": "completed", "merchant_alias": alias}
 
 def _safe_dashboard_identity(identity: dict[str, Any] | None) -> dict[str, str]:
     if not identity:
@@ -568,6 +633,7 @@ def create_human_search_handler(
     dev_identity_enabled: bool = False,
     cloudflare_validator: CloudflareValidator | None = None,
     audit_path: str | Path | None = None,
+    secret_store_path: str | Path | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "Service"
@@ -597,6 +663,10 @@ def create_human_search_handler(
                     cloudflare_validator=cloudflare_validator,
                 )
                 self._send_bytes(200, rendered_page.encode("utf-8"), "text/html; charset=utf-8")
+                return
+            if parsed.path == "/setup":
+                html_body = render_setup_wizard()
+                self._send_bytes(200, html_body.encode("utf-8"), "text/html; charset=utf-8")
                 return
             if parsed.path.startswith("/api/artifacts/"):
                 artifact_id = unquote(parsed.path.removeprefix("/api/artifacts/"))
@@ -628,6 +698,20 @@ def create_human_search_handler(
 
         def do_POST(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
+            if parsed.path == "/setup":
+                try:
+                    payload = self._read_payload()
+                except json.JSONDecodeError:
+                    html_body = render_setup_wizard(error="Invalid setup request")
+                    self._send_bytes(400, html_body.encode("utf-8"), "text/html; charset=utf-8")
+                    return
+                result = save_browser_setup(payload, config_path=config_path, secret_store_path=secret_store_path)
+                if result.get("status") != "completed":
+                    html_body = render_setup_wizard(error=str(result.get("error") or "Setup failed"), values=payload)
+                    self._send_bytes(400, html_body.encode("utf-8"), "text/html; charset=utf-8")
+                    return
+                self._send_redirect("/")
+                return
             if parsed.path not in ("/api/search", "/api/investigate"):
                 self._send_json(404, {"status": "error", "error": "Not found"})
                 return
@@ -727,6 +811,13 @@ def create_human_search_handler(
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def _send_redirect(self, location: str) -> None:
+            self.send_response(303)
+            self.send_header("Location", location)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
     Handler.cloudflare_validator = cloudflare_validator  # type: ignore[attr-defined]
     return Handler

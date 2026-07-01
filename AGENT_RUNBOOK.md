@@ -2,6 +2,8 @@
 
 The AI agent should use the deterministic Payment Search CLI/API. Do not scrape the browser.
 
+Humans use the browser setup wizard for first-run setup. Agents may use `payment-search add-merchant` as a deterministic fallback or to support scripted validation.
+
 ## Allowed local commands
 
 Use these for normal support:
@@ -33,7 +35,7 @@ printf '%s' "$MERCHANT_API_KEY" | payment-search add-merchant \
 - Do not print API keys, raw gateway payloads, full card data, generated private reports, or private transaction details into chat.
 - Do not invent payment facts. Report only what the CLI/API returns.
 - Live gateway calls require valid merchant authorization and an approved purpose.
-- If the browser shows setup-required guidance, run or guide `payment-search add-merchant`.
+- If the browser shows setup-required guidance, guide the human to **Open setup wizard** or `/setup`; use `payment-search add-merchant` only as the deterministic fallback.
 
 ## Human/browser flow
 
@@ -43,6 +45,6 @@ Humans use:
 payment-search start
 ```
 
-Then they open the local URL and use Transaction Search / Transaction Detail.
+Then they open the local URL. If setup is incomplete, they click **Open setup wizard** or visit `/setup`, enter the merchant credential once, and continue to Transaction Search / Transaction Detail.
 
 The CLI remains the agent-facing control surface; the browser remains the human-facing surface.
