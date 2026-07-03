@@ -38,7 +38,7 @@ from .config import load_merchant_config, resolve_default_merchant_alias
 from .gateways.nmi import NMI_ADAPTER_INFO
 from .identity import CloudflareValidator, extract_identity
 from .secrets import resolve_security_key  # noqa: F401 - exercised by later parity route wiring
-from .service_requests import validate_investigate_request, validate_search_request, validation_error_response
+from .service_requests import DEFAULT_MAX_PAGES, validate_investigate_request, validate_search_request, validation_error_response
 from .tenant_registry import TenantRegistry
 
 
@@ -445,7 +445,7 @@ def _api_search_args(form: dict[str, Any], *, timeout: int) -> Namespace:
         condition=_clean(form.get("condition")),
         transaction_type=_clean(form.get("transaction_type")),
         result_limit=int(form.get("result_limit") or 100),
-        max_pages=int(form.get("max_pages") or 5),
+        max_pages=int(form.get("max_pages") or DEFAULT_MAX_PAGES),
         timeout=timeout,
     )
 

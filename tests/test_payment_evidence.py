@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from payment_evidence.api_app import _api_search_args, _search_form
+from payment_evidence.api_models import SearchRequest
 from payment_evidence.candidate_search import rank_candidate_transactions
 from payment_evidence.parser import parse_query_response
 from payment_evidence.redaction import redact_transaction, redact_transactions
@@ -249,6 +251,14 @@ class ServiceRequestValidationTests(unittest.TestCase):
 
         self.assertTrue(result.valid, result.errors)
         self.assertEqual(result.normalized["max_pages"], 25)
+
+    def test_fastapi_search_request_defaults_to_full_page_budget(self):
+        request = SearchRequest(start_date="2026-04-01", end_date="2026-05-10", last_four="7007")
+        form = _search_form(request)
+        args = _api_search_args(form, timeout=20)
+
+        self.assertEqual(form["max_pages"], 25)
+        self.assertEqual(args.max_pages, 25)
 
 
 class CliTests(unittest.TestCase):
