@@ -103,7 +103,7 @@ class SearchRequest(ApiModel):
     condition: BoundedText | None = None
     transaction_type: BoundedText | None = None
     result_limit: int = Field(default=100, ge=1, le=500)
-    max_pages: int = Field(default=5, ge=1, le=25)
+    max_pages: int = Field(default=25, ge=1, le=25)
 
 
 class CandidateActionSummary(ApiResponseModel):
