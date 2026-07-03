@@ -4,10 +4,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from .amounts import normalize_amount_text
+
 DATE_PATTERN = re.compile(r"^\d{14}$")
 HUMAN_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MAX_RESULT_LIMIT = 500
 MAX_MAX_PAGES = 25
+DEFAULT_MAX_PAGES = 25
 
 _ALLOWED_FIELDS: frozenset[str] = frozenset({
     "merchant_id",
@@ -69,7 +72,7 @@ def _normalized_base(form: dict[str, Any]) -> dict[str, Any]:
         if key in _ALLOWED_FIELDS and _clean(value) is not None
     }
     normalized.setdefault("result_limit", "100")
-    normalized.setdefault("max_pages", "5")
+    normalized.setdefault("max_pages", str(DEFAULT_MAX_PAGES))
     if "max_pages" in normalized:
         max_pages = _positive_int(normalized["max_pages"])
         normalized["max_pages"] = max_pages if max_pages is not None else normalized["max_pages"]
@@ -108,6 +111,7 @@ def _normalize_date_window(normalized: dict[str, Any]) -> list[dict[str, str]]:
             continue
         errors.append({"field": field_name, "code": "invalid_date"})
     if amount:
+        normalized["amount"] = normalize_amount_text(amount)
         if not _clean(normalized.get("start_date")):
             errors.append({"field": "start_date", "code": "required_for_amount"})
         if not _clean(normalized.get("end_date")):

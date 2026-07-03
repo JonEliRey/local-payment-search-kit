@@ -3,6 +3,8 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from .amounts import normalize_amount_text
+
 
 def rank_candidate_transactions(
     transactions: list[dict[str, Any]],
@@ -225,6 +227,6 @@ def _same_text(left: Any, right: Any) -> bool:
 
 def _decimal(value: str) -> Decimal | None:
     try:
-        return Decimal(str(value).strip()).quantize(Decimal("0.01"))
+        return Decimal(normalize_amount_text(str(value))).quantize(Decimal("0.01"))
     except (InvalidOperation, ValueError):
         return None

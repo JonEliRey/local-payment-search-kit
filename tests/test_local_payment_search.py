@@ -186,7 +186,12 @@ class PaymentSearchStartTests(unittest.TestCase):
         self.assertIn("Local Shop", html)
         self.assertNotIn("Setup required", html)
 
+    def test_dashboard_search_defaults_to_full_page_budget(self):
+        from payment_evidence.web_dashboard import render_human_search_dashboard
 
+        html = render_human_search_dashboard(["merchant-local"])
+
+        self.assertIn('name="max_pages" value="25"', html)
 
 
 class PaymentSearchDashboardArtifactTests(unittest.TestCase):

@@ -6,6 +6,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from .amounts import normalize_amount_text
 from .parser import parse_query_response
 from .redaction import RedactionMode, redact_transactions
 
@@ -55,7 +56,7 @@ def build_query_params(
     if order_id:
         params["order_id"] = order_id
     if amount:
-        params["amount"] = amount
+        params["amount"] = normalize_amount_text(amount)
         params["action_type"] = action_type or "sale"
     if start_date:
         params["start_date"] = start_date
