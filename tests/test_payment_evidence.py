@@ -7,10 +7,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from payment_evidence.candidate_search import rank_candidate_transactions
 from payment_evidence.parser import parse_query_response
 from payment_evidence.redaction import redact_transaction, redact_transactions
 from payment_evidence.config import load_merchant_config, resolve_default_merchant_alias
 from payment_evidence.query import build_query_params
+from payment_evidence.service_requests import validate_search_request
 
 SAMPLE_XML = b'''<?xml version="1.0" encoding="UTF-8"?>
 <nm_response>
@@ -196,6 +198,57 @@ class QueryTests(unittest.TestCase):
         self.assertEqual(params["amount"], "42.50")
         self.assertEqual(params["start_date"], "20260612000000")
         self.assertEqual(params["end_date"], "20260613000000")
+
+    def test_build_query_params_normalizes_thousands_separator_amount(self):
+        params = build_query_params(
+            security_key="secret",
+            amount="9,329.31",
+            start_date="20260510000000",
+            end_date="20260510235959",
+        )
+
+        self.assertEqual(params["amount"], "9329.31")
+
+
+class CandidateSearchTests(unittest.TestCase):
+    def test_rank_candidate_transactions_matches_thousands_separator_amount(self):
+        txn = parse_query_response(SAMPLE_XML)["transactions"][0]
+        txn["actions"][0]["amount"] = "9329.31"
+        txn["actions"][1]["amount"] = "9329.31"
+        txn["actions"][0]["date"] = "20260510230813"
+        txn["cc_number"] = "3xxxxxxxxxx7007"
+
+        ranked = rank_candidate_transactions(
+            [txn],
+            amount="9,329.31",
+            last_four="7007",
+            start_date="20260510000000",
+            end_date="20260510235959",
+        )
+
+        self.assertEqual(ranked["candidate_summary"]["candidate_count"], 1)
+        self.assertEqual(ranked["candidates"][0]["amount"], "9329.31")
+
+
+class ServiceRequestValidationTests(unittest.TestCase):
+    def test_validate_search_request_normalizes_thousands_separator_amount(self):
+        result = validate_search_request(
+            {
+                "start_date": "2026-05-10",
+                "end_date": "2026-05-10",
+                "amount": "9,329.31",
+                "last_four": "7007",
+            }
+        )
+
+        self.assertTrue(result.valid, result.errors)
+        self.assertEqual(result.normalized["amount"], "9329.31")
+
+    def test_validate_search_request_defaults_to_full_page_budget(self):
+        result = validate_search_request({"start_date": "2026-04-01", "end_date": "2026-05-10", "last_four": "7007"})
+
+        self.assertTrue(result.valid, result.errors)
+        self.assertEqual(result.normalized["max_pages"], 25)
 
 
 class CliTests(unittest.TestCase):

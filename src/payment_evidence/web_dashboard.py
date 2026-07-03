@@ -19,7 +19,7 @@ from .config import load_configured_aliases, load_merchant_config, resolve_defau
 from .identity import CloudflareValidator, extract_identity
 from .secret_store import LocalSecretStore, default_secret_store_path
 from .secrets import resolve_security_key
-from .service_requests import validation_error_response, validate_investigate_request, validate_search_request
+from .service_requests import DEFAULT_MAX_PAGES, validation_error_response, validate_investigate_request, validate_search_request
 from .tenant_registry import TenantRegistry
 
 LOCAL_ARTIFACT_TTL_SECONDS = 100 * 365 * 24 * 60 * 60
@@ -115,7 +115,7 @@ def render_human_search_dashboard(
   {setup_required_panel}
   <section><h2>Transaction Search</h2><p class="note">Gateway timezone: UTC. Enter calendar dates; the service searches from 00:00:00 through 23:59:59 UTC for the selected days.</p><p class="note">If transaction ID is provided, the system performs an exact transaction lookup first. Amount and last four validate the selected transaction instead of producing lower-probability noise.</p>
     <form data-testid="human-search-form" id="searchForm">
-      <label>Merchant ID / alias {merchant_control}</label><label>Start date <input id="start_date" name="start_date" type="date" data-date-window-required="true"></label><label>End date <input id="end_date" name="end_date" type="date" data-date-window-required="true"></label><label>Amount <input name="amount" placeholder="42.50" inputmode="decimal"></label><label>Order ID <input name="order_id" autocomplete="off"></label><label>Transaction ID <input id="transaction_id" name="transaction_id" autocomplete="off" aria-describedby="dateRequirementNote"></label><label>Last four <input name="last_four" maxlength="4" inputmode="numeric"></label><label>Result limit <input name="result_limit" value="100" inputmode="numeric"></label><label>Max pages <input name="max_pages" value="5" inputmode="numeric"></label>
+      <label>Merchant ID / alias {merchant_control}</label><label>Start date <input id="start_date" name="start_date" type="date" data-date-window-required="true"></label><label>End date <input id="end_date" name="end_date" type="date" data-date-window-required="true"></label><label>Amount <input name="amount" placeholder="42.50" inputmode="decimal"></label><label>Order ID <input name="order_id" autocomplete="off"></label><label>Transaction ID <input id="transaction_id" name="transaction_id" autocomplete="off" aria-describedby="dateRequirementNote"></label><label>Last four <input name="last_four" maxlength="4" inputmode="numeric"></label><label>Result limit <input name="result_limit" value="100" inputmode="numeric"></label><label>Max pages <input name="max_pages" value="{DEFAULT_MAX_PAGES}" inputmode="numeric"></label>
       <div class="actions"><button id="searchButton" type="submit">Search gateway</button><button class="secondary" id="investigateButton" type="button">See detail</button></div>
     </form>
     <p class="status" id="dateRequirementNote">Date window required unless a transaction ID is provided.</p>
@@ -1093,7 +1093,7 @@ def _search_args(form: dict[str, Any], *, timeout: int) -> Namespace:
         condition=_clean(form.get("condition")),
         transaction_type=_clean(form.get("transaction_type")),
         result_limit=_clean(form.get("result_limit")) or "100",
-        max_pages=int(_clean(form.get("max_pages")) or 5),
+        max_pages=int(_clean(form.get("max_pages")) or DEFAULT_MAX_PAGES),
         timeout=timeout,
     )
 
